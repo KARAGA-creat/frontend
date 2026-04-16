@@ -1,16 +1,62 @@
-# React + Vite
+# 💹 FinanceIQ-Frontend React
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Interface utilisateur de l'application de Gestion Financière  
+**Stack :** React.js · Redux Toolkit · Axios · React Router v6
 
-Currently, two official plugins are available:
+---
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+## 📋Description
 
-## React Compiler
+Interface moderne et intuitive permettant aux dirigeants de PME et TPE de visualiser et gérer leurs finances en temps réel — sans formation comptable requise.
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+---
 
-## Expanding the ESLint configuration
+## ⚙️ Technologies utilisées
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+- React.js 18 (Vite)
+- Redux Toolkit (gestion d'état)
+- Axios (communication avec l'API)
+- React Router v6 (navigation)
+
+---
+
+## 🚀 Installation rapide
+
+### 1. Cloner le projet
+```bash
+git clone https://github.com/KARAGA-creat/frontend.git
+cd frontend
+```
+
+### 2. Installer les dépendances
+```bash
+npm install
+```
+
+### 3. Démarrer l'application
+```bash
+npm run dev
+```
+Application disponible sur : **http://localhost:5173**
+
+> ⚠️ Le backend Django doit être lancé en parallèle sur http://127.0.0.1:8000
+
+---
+
+## 📱 Pages disponibles
+
+| Page | Description |
+|------|-------------|
+| 🔐 Login / Inscription | Connexion et création de compte |
+| 📊 Dashboard | Tableau de bord en temps réel |
+| ↕️ Transactions | Enregistrement des entrées/sorties |
+| 📄 Dettes & Factures | Suivi des créances et dettes |
+| ◎ Budgets & Alertes | Contrôle des dépenses |
+| 📈 Rapports | Rapports financiers mensuels |
+| 👥 Tiers | Gestion clients/fournisseurs |
+| ⚙️ Paramètres | Administration (Admin uniquement) |
+
+---
+
+## 🔗 Backend
+👉 [github.com/KARAGA-creat/gestion_financiere](https://github.com/KARAGA-creat/gestion_financiere)
