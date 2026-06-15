@@ -1,29 +1,26 @@
 import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { getRapports, genererRapport } from '../api/rapportsAPI';
+import Layout, { T, useIsMobile } from '../components/Layout';
 
+const MOIS = ['', 'Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin',
+               'Juillet', 'Août', 'Septembre', 'Octobre', 'Novembre', 'Décembre'];
 
 export default function Rapports() {
-    const navigate = useNavigate();
-    const [rapports, setRapports] = useState([]);
-    const [loading, setLoading]   = useState(true);
+    const isMobile = useIsMobile();
+    const [rapports, setRapports]     = useState([]);
+    const [loading, setLoading]       = useState(true);
     const [generating, setGenerating] = useState(false);
-    const [form, setForm] = useState({
-        mois: new Date().getMonth() + 1,
-        annee: new Date().getFullYear(),
-    });
+    const [pdfLoading, setPdfLoading] = useState(null);
+    const [form, setForm] = useState({ mois: new Date().getMonth() + 1, annee: new Date().getFullYear() });
 
     useEffect(() => { fetchData(); }, []);
 
     const fetchData = async () => {
         try {
             const r = await getRapports();
-            setRapports(r);
-        } catch (err) {
-            console.error(err);
-        } finally {
-            setLoading(false);
-        }
+            setRapports(Array.isArray(r) ? r : (r.results || []));
+        } catch (err) { console.error(err); }
+        finally { setLoading(false); }
     };
 
     const handleGenerer = async () => {
@@ -31,158 +28,135 @@ export default function Rapports() {
         try {
             await genererRapport(form.mois, form.annee);
             fetchData();
-        } catch (err) {
-            console.error(err);
-        } finally {
-            setGenerating(false);
-        }
+        } catch (err) { console.error(err); }
+        finally { setGenerating(false); }
     };
 
-    const moisNoms = ['', 'Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin',
-                      'Juillet', 'Août', 'Septembre', 'Octobre', 'Novembre', 'Décembre'];
+    const handleExportPDF = async (mois, annee) => {
+        setPdfLoading(`${mois}-${annee}`);
+        try {
+            const token = localStorage.getItem('access_token');
+            const res = await fetch(`/api/rapports/pdf/?mois=${mois}&annee=${annee}`, {
+                headers: { Authorization: `Bearer ${token}` }
+            });
+            if (!res.ok) throw new Error('Erreur PDF');
+            const blob = await res.blob();
+            const url  = window.URL.createObjectURL(blob);
+            const a    = document.createElement('a');
+            a.href     = url;
+            a.download = `rapport_${MOIS[mois]}_${annee}.pdf`;
+            a.click();
+            window.URL.revokeObjectURL(url);
+        } catch (err) { console.error(err); }
+        finally { setPdfLoading(null); }
+    };
 
-    if (loading) return <div style={styles.loading}>Chargement...</div>;
+    const totalEntrees = rapports.reduce((s, r) => s + parseFloat(r.total_entrees || 0), 0);
+    const totalSorties = rapports.reduce((s, r) => s + parseFloat(r.total_sorties || 0), 0);
+    const soldeFinal   = totalEntrees - totalSorties;
 
-    return (
-        <div style={styles.container}>
-            {/* SIDEBAR */}
-            <aside style={styles.sidebar}>
-                <div style={styles.logo}>
-                    <span>💹</span>
-                    <div>
-                        <div style={styles.logoText}>FinanceIQ</div>
-                        <div style={styles.logoSub}>Gestion Financière</div>
-                    </div>
-                </div>
-                <nav style={styles.nav}>
-                    <div style={styles.navLabel}>Principal</div>
-                    <div style={styles.navItem} onClick={() => navigate('/dashboard')}>⊞ Dashboard</div>
-                    <div style={styles.navItem} onClick={() => navigate('/transactions')}>↕ Transactions</div>
-                    <div style={styles.navItem} onClick={() => navigate('/dettes')}>📄 Dettes & Factures</div>
-                    <div style={styles.navItem} onClick={() => navigate('/budgets')}>◎ Budgets</div>
-                    <div style={styles.navLabel}>Analyse</div>
-                    <div style={{...styles.navItem, ...styles.navActive}}>📊 Rapports</div>
-                    <div style={styles.navItem} onClick={() => navigate('/tiers')}>👥 Tiers</div>
-                    <div style={styles.navItem} onClick={() => navigate('/parametres')}> ⚙ Paramètres </div>
-                </nav>
-            </aside>
+    const inp = { padding:'9px 12px', background:T.surface2, border:`1px solid ${T.border}`, borderRadius:8, color:T.text, fontSize:13, outline:'none' };
 
-            {/* MAIN */}
-            <main style={styles.main}>
-                <header style={styles.topbar}>
-                    <div>
-                        <h1 style={styles.pageTitle}>Rapports Financiers</h1>
-                        <p style={styles.pageSub}>Historique des snapshots mensuels</p>
-                    </div>
-                </header>
-
-                <div style={styles.content}>
-                    {/* GENERATEUR */}
-                    <div style={styles.card}>
-                        <h2 style={styles.cardTitle}>Générer un Rapport</h2>
-                        <div style={styles.genForm}>
-                            <div style={styles.field}>
-                                <label style={styles.label}>Mois</label>
-                                <select style={styles.input}
-                                    value={form.mois}
-                                    onChange={e => setForm({...form, mois: parseInt(e.target.value)})}>
-                                    {moisNoms.slice(1).map((m, i) => (
-                                        <option key={i+1} value={i+1}>{m}</option>
-                                    ))}
-                                </select>
-                            </div>
-                            <div style={styles.field}>
-                                <label style={styles.label}>Année</label>
-                                <input style={styles.input} type="number"
-                                    value={form.annee}
-                                    onChange={e => setForm({...form, annee: parseInt(e.target.value)})}
-                                    min="2020" max="2030" />
-                            </div>
-                            <button style={generating ? styles.btnDisabled : styles.btn}
-                                onClick={handleGenerer}
-                                disabled={generating}>
-                                {generating ? 'Génération...' : '📊 Générer'}
-                            </button>
-                        </div>
-                    </div>
-
-                    {/* LISTE RAPPORTS */}
-                    <div style={styles.card}>
-                        <h2 style={styles.cardTitle}>
-                            Historique ({rapports.length} rapports)
-                        </h2>
-                        {rapports.length === 0 ? (
-                            <p style={styles.empty}>Aucun rapport généré</p>
-                        ) : (
-                            <table style={styles.table}>
-                                <thead>
-                                    <tr>
-                                        <th style={styles.th}>Période</th>
-                                        <th style={styles.th}>Total Entrées</th>
-                                        <th style={styles.th}>Total Sorties</th>
-                                        <th style={styles.th}>Solde Final</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {rapports.map(r => (
-                                        <tr key={r.id}>
-                                            <td style={styles.td}>
-                                                <strong>
-                                                    {moisNoms[r.mois]} {r.annee}
-                                                </strong>
-                                            </td>
-                                            <td style={{...styles.td, color: '#10b981', fontFamily: 'monospace'}}>
-                                                +{parseFloat(r.total_entrees).toLocaleString()} XOF
-                                            </td>
-                                            <td style={{...styles.td, color: '#ef4444', fontFamily: 'monospace'}}>
-                                                -{parseFloat(r.total_sorties).toLocaleString()} XOF
-                                            </td>
-                                            <td style={{
-                                                ...styles.td,
-                                                color: parseFloat(r.solde_final) >= 0 ? '#10b981' : '#ef4444',
-                                                fontFamily: 'monospace',
-                                                fontWeight: '700'
-                                            }}>
-                                                {parseFloat(r.solde_final).toLocaleString()} XOF
-                                            </td>
-                                        </tr>
-                                    ))}
-                                </tbody>
-                            </table>
-                        )}
-                    </div>
-                </div>
-            </main>
+    if (loading) return (
+        <div style={{ display:'flex', alignItems:'center', justifyContent:'center', height:'100vh', background:T.bg, color:T.textSoft, flexDirection:'column', gap:12 }}>
+            <style>{`@keyframes spin{to{transform:rotate(360deg);}}`}</style>
+            <div style={{ width:36, height:36, borderRadius:99, border:`3px solid ${T.surface2}`, borderTop:`3px solid ${T.accent}`, animation:'spin 0.8s linear infinite' }}/>
+            Chargement…
         </div>
     );
-}
 
-const styles = {
-    container:   { display: 'flex', minHeight: '100vh', background: '#0b0f1a', color: '#f1f5f9' },
-    loading:     { display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', background: '#0b0f1a', color: '#f1f5f9' },
-    sidebar:     { width: '240px', background: '#111827', borderRight: '1px solid #1f2d45', display: 'flex', flexDirection: 'column', padding: '28px 0', flexShrink: 0 },
-    logo:        { padding: '0 24px 24px', display: 'flex', alignItems: 'center', gap: '10px', borderBottom: '1px solid #1f2d45', marginBottom: '20px' },
-    logoText:    { fontSize: '17px', fontWeight: '800', color: '#f1f5f9' },
-    logoSub:     { fontSize: '10px', color: '#64748b', textTransform: 'uppercase' },
-    nav:         { padding: '0 16px', flex: 1 },
-    navLabel:    { fontSize: '10px', fontWeight: '700', letterSpacing: '1px', textTransform: 'uppercase', color: '#64748b', padding: '8px 8px', marginTop: '8px' },
-    navItem:     { display: 'flex', alignItems: 'center', gap: '10px', padding: '10px 12px', borderRadius: '10px', cursor: 'pointer', color: '#94a3b8', fontSize: '13.5px', fontWeight: '500', marginBottom: '2px' },
-    navActive:   { background: 'rgba(59,130,246,0.15)', color: '#3b82f6', border: '1px solid rgba(59,130,246,0.25)' },
-    main:        { flex: 1, display: 'flex', flexDirection: 'column', overflowY: 'auto' },
-    topbar:      { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '20px 32px', borderBottom: '1px solid #1f2d45' },
-    pageTitle:   { fontSize: '20px', fontWeight: '800', color: '#f1f5f9' },
-    pageSub:     { fontSize: '12px', color: '#64748b', marginTop: '2px' },
-    content:     { padding: '28px 32px' },
-    card:        { background: '#111827', border: '1px solid #1f2d45', borderRadius: '16px', padding: '24px', marginBottom: '20px' },
-    cardTitle:   { fontSize: '15px', fontWeight: '700', color: '#f1f5f9', marginBottom: '16px' },
-    genForm:     { display: 'flex', alignItems: 'flex-end', gap: '16px' },
-    field:       { display: 'flex', flexDirection: 'column', gap: '6px' },
-    label:       { fontSize: '12px', fontWeight: '600', color: '#94a3b8' },
-    input:       { padding: '10px 14px', background: '#1a2235', border: '1px solid #1f2d45', borderRadius: '8px', color: '#f1f5f9', fontSize: '13px', outline: 'none' },
-    btn:         { padding: '10px 20px', background: 'linear-gradient(135deg, #3b82f6, #06b6d4)', border: 'none', borderRadius: '10px', color: '#fff', fontSize: '13px', fontWeight: '700', cursor: 'pointer' },
-    btnDisabled: { padding: '10px 20px', background: '#1a2235', border: 'none', borderRadius: '10px', color: '#64748b', fontSize: '13px', fontWeight: '700', cursor: 'not-allowed' },
-    empty:       { color: '#64748b', fontSize: '14px', textAlign: 'center', padding: '20px' },
-    table:       { width: '100%', borderCollapse: 'collapse' },
-    th:          { padding: '10px 16px', textAlign: 'left', fontSize: '11px', fontWeight: '700', textTransform: 'uppercase', color: '#64748b', borderBottom: '1px solid #1f2d45' },
-    td:          { padding: '12px 16px', fontSize: '13px', color: '#f1f5f9', borderBottom: '1px solid #1f2d45' },
-};
+    return (
+        <Layout>
+            <div style={{ padding: isMobile ? '16px' : '28px 32px' }}>
+                <div style={{ marginBottom:24 }}>
+                    <h1 style={{ fontFamily:"'Calistoga',serif", fontSize:isMobile?20:24, fontWeight:400, color:T.text }}>Rapports Financiers</h1>
+                    <p style={{ color:T.textSoft, fontSize:13, marginTop:4 }}>Historique des snapshots mensuels</p>
+                </div>
+
+                {/* KPI GLOBAUX */}
+                <div style={{ display:'grid', gridTemplateColumns: isMobile ? '1fr 1fr' : '1fr 1fr 1fr', gap:14, marginBottom:24 }}>
+                    {[
+                        { label:'Total Entrées', val:totalEntrees, color:T.accent },
+                        { label:'Total Sorties', val:totalSorties, color:T.danger },
+                        { label:'Solde Global',  val:soldeFinal,   color:soldeFinal>=0?T.accent:T.danger },
+                    ].map(k => (
+                        <div key={k.label} style={{ background:T.surface, border:`1px solid ${T.border}`, borderRadius:12, padding:'18px 20px' }}>
+                            <p style={{ fontSize:11, color:T.textSoft, marginBottom:8, textTransform:'uppercase', letterSpacing:'0.06em' }}>{k.label}</p>
+                            <p style={{ fontSize:18, fontWeight:700, color:k.color, fontFamily:'monospace' }}>
+                                {k.val >= 0 ? '+' : ''}{k.val.toLocaleString('fr-FR')} XOF
+                            </p>
+                        </div>
+                    ))}
+                </div>
+
+                {/* GENERATEUR */}
+                <div style={{ background:T.surface, border:`1px solid ${T.border}`, borderRadius:14, padding:'22px 24px', marginBottom:20 }}>
+                    <h2 style={{ fontSize:15, fontWeight:600, color:T.text, marginBottom:18 }}>Générer un Rapport</h2>
+                    <div style={{ display:'flex', flexWrap:'wrap', alignItems:'flex-end', gap:14 }}>
+                        <div>
+                            <label style={{ fontSize:12, fontWeight:600, color:T.textSoft, display:'block', marginBottom:6 }}>Mois</label>
+                            <select style={inp} value={form.mois} onChange={e => setForm(p => ({...p, mois: parseInt(e.target.value)}))}>
+                                {MOIS.slice(1).map((m, i) => <option key={i+1} value={i+1}>{m}</option>)}
+                            </select>
+                        </div>
+                        <div>
+                            <label style={{ fontSize:12, fontWeight:600, color:T.textSoft, display:'block', marginBottom:6 }}>Année</label>
+                            <input style={inp} type="number" value={form.annee} min="2020" max="2035"
+                                onChange={e => setForm(p => ({...p, annee: parseInt(e.target.value)}))}/>
+                        </div>
+                        <button onClick={handleGenerer} disabled={generating} style={{ padding:'10px 22px', background:generating?T.surface2:`linear-gradient(135deg,${T.accent},#16A34A)`, border:'none', borderRadius:9, color:generating?T.muted:'#000', fontSize:13, fontWeight:700, cursor:generating?'not-allowed':'pointer' }}>
+                            {generating ? '⏳ Génération…' : '📊 Générer'}
+                        </button>
+                    </div>
+                </div>
+
+                {/* TABLEAU */}
+                <div style={{ background:T.surface, border:`1px solid ${T.border}`, borderRadius:14, overflow:'hidden', overflowX:'auto' }}>
+                    <div style={{ padding:'16px 20px', borderBottom:`1px solid ${T.border}` }}>
+                        <span style={{ fontSize:14, fontWeight:600, color:T.text }}>Historique</span>
+                        <span style={{ marginLeft:10, fontSize:12, color:T.muted }}>({rapports.length} rapport{rapports.length>1?'s':''})</span>
+                    </div>
+                    {rapports.length === 0
+                        ? <p style={{ textAlign:'center', color:T.muted, padding:'40px', fontSize:14 }}>Aucun rapport généré — cliquez sur "Générer" ci-dessus.</p>
+                        : <table style={{ width:'100%', borderCollapse:'collapse' }}>
+                            <thead>
+                                <tr style={{ background:'rgba(255,255,255,0.02)' }}>
+                                    {['Période','Total Entrées','Total Sorties','Solde Final','PDF'].map(h => (
+                                        <th key={h} style={{ padding:'10px 20px', textAlign:'left', fontSize:11, fontWeight:700, textTransform:'uppercase', color:T.muted, borderBottom:`1px solid ${T.border}`, letterSpacing:'0.05em' }}>{h}</th>
+                                    ))}
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {rapports.map(r => {
+                                    const solde = parseFloat(r.solde_final);
+                                    return (
+                                        <tr key={r.id} style={{ borderBottom:`1px solid ${T.border}` }}>
+                                            <td style={{ padding:'14px 20px', fontSize:13, fontWeight:700, color:T.text }}>{MOIS[r.mois]} {r.annee}</td>
+                                            <td style={{ padding:'14px 20px', fontSize:13, fontFamily:'monospace', color:T.accent }}>
+                                                +{parseFloat(r.total_entrees).toLocaleString('fr-FR')} XOF
+                                            </td>
+                                            <td style={{ padding:'14px 20px', fontSize:13, fontFamily:'monospace', color:T.danger }}>
+                                                -{parseFloat(r.total_sorties).toLocaleString('fr-FR')} XOF
+                                            </td>
+                                            <td style={{ padding:'14px 20px', fontSize:14, fontFamily:'monospace', fontWeight:700, color:solde>=0?T.accent:T.danger }}>
+                                                {solde>=0?'+':''}{solde.toLocaleString('fr-FR')} XOF
+                                            </td>
+                                            <td style={{ padding:'14px 20px' }}>
+                                                <button
+                                                    onClick={() => handleExportPDF(r.mois, r.annee)}
+                                                    disabled={pdfLoading === `${r.mois}-${r.annee}`}
+                                                    style={{ padding:'6px 14px', background:'rgba(239,68,68,0.1)', border:'1px solid rgba(239,68,68,0.25)', borderRadius:7, color:'#F87171', fontSize:12, fontWeight:700, cursor:'pointer', whiteSpace:'nowrap' }}>
+                                                    {pdfLoading === `${r.mois}-${r.annee}` ? '⏳' : '📄 PDF'}
+                                                </button>
+                                            </td>
+                                        </tr>
+                                    );
+                                })}
+                            </tbody>
+                        </table>
+                    }
+                </div>
+            </div>
+        </Layout>
+    );
+}

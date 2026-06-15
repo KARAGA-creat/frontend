@@ -1,52 +1,48 @@
 import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useSelector } from 'react-redux';
 import { getCategories, createCategorie, deleteCategorie } from '../api/categoriesAPI';
 import API from '../api/axios';
-import { getUtilisateurs, creerGestionnaire } from '../api/authAPI';
+import { getUtilisateurs, toggleStatutUtilisateur, supprimerUtilisateur } from '../api/authAPI';
+import Layout, { T, useIsMobile } from '../components/Layout';
+
 export default function Parametres() {
-    const navigate = useNavigate();
+    const isMobile  = useIsMobile();
+    const currentUser = useSelector(s => s.auth.user);
     const [categories, setCategories] = useState([]);
     const [loading, setLoading]       = useState(true);
     const [newCat, setNewCat]         = useState('');
     const [entreprise, setEntreprise] = useState(null);
-    const [formEntreprise, setFormEntreprise] = useState({
-        nom: '', devise: 'XOF', date_creation: '', logo: '',
-    });
-
+    const [formEntreprise, setFormEntreprise] = useState({ nom:'', devise:'XOF', date_creation:'', logo:'' });
     const [utilisateurs, setUtilisateurs] = useState([]);
-    const [showUserForm, setShowUserForm] = useState(false);
-    const [formUser, setFormUser] = useState({
-        username: '',
-        email: '',
-        password: '',
-    });
-    const [userError, setUserError]     = useState('');
-    const [userSuccess, setUserSuccess] = useState('');
-    const [logoPreview, setLogoPreview] = useState(null);
+    const [inviteEmail, setInviteEmail]   = useState('');
+    const [userError, setUserError]       = useState('');
+    const [userSuccess, setUserSuccess]   = useState('');
+    const [inviteLoading, setInviteLoading] = useState(false);
+    const [logoPreview, setLogoPreview]   = useState(null);
+    const [entSuccess, setEntSuccess]     = useState('');
+    const [actionLoading, setActionLoading] = useState(null);
 
     useEffect(() => { fetchData(); }, []);
 
     const fetchData = async () => {
         try {
-            const [c, e] = await Promise.all([
-                getCategories(),
-                API.get('entreprises/'),
-                getUtilisateurs(), 
-            ]);
-            setCategories(c);
+            const [c, e] = await Promise.all([getCategories(), API.get('entreprises/')]);
+            setCategories(Array.isArray(c) ? c : (c.results || []));
             setEntreprise(e.data);
-            setUtilisateurs(u);
             setFormEntreprise({
-                nom: e.data.nom,
-                devise: e.data.devise,
-                date_creation: e.data.date_creation,
-                logo: e.data.logo,
+                nom:           e.data.nom           || '',
+                devise:        e.data.devise        || 'XOF',
+                date_creation: e.data.date_creation || '',
+                logo:          e.data.logo          || '',
             });
-        } catch (err) {
-            console.error(err);
-        } finally {
-            setLoading(false);
-        }
+        } catch (err) { console.error('entreprise/categories:', err); }
+
+        try {
+            const u = await getUtilisateurs();
+            setUtilisateurs(Array.isArray(u) ? u : (u.results || []));
+        } catch (err) { console.error('utilisateurs:', err); }
+
+        setLoading(false);
     };
 
     const handleAddCategorie = async (e) => {
@@ -56,380 +52,212 @@ export default function Parametres() {
             await createCategorie({ nom_categorie: newCat });
             setNewCat('');
             fetchData();
-        } catch (err) {
-            console.error(err);
-        }
+        } catch (err) { console.error(err); }
     };
 
     const handleDeleteCategorie = async (id) => {
-        if (window.confirm('Supprimer cette catégorie ?')) {
-            await deleteCategorie(id);
-            fetchData();
-        }
+        if (window.confirm('Supprimer cette catégorie ?')) { await deleteCategorie(id); fetchData(); }
     };
 
     const handleSaveEntreprise = async (e) => {
         e.preventDefault();
+        setEntSuccess('');
         try {
             const formData = new FormData();
             formData.append('nom', formEntreprise.nom);
             formData.append('devise', formEntreprise.devise);
             formData.append('date_creation', formEntreprise.date_creation);
-            if (formEntreprise.logo instanceof File) {
-                formData.append('logo', formEntreprise.logo);
-            }
-            await API.put('entreprises/', formData, {
-                headers: { 'Content-Type': 'multipart/form-data' }
-            });
-            alert('Entreprise mise à jour !');
+            if (formEntreprise.logo instanceof File) formData.append('logo', formEntreprise.logo);
+            await API.put('entreprises/', formData, { headers: { 'Content-Type': 'multipart/form-data' } });
+            setEntSuccess('Informations mises à jour avec succès !');
             fetchData();
-        } catch (err) {
-            console.error(err);
-            alert('Erreur lors de la mise à jour de l\'entreprise.');}
+        } catch (err) { console.error(err); }
     };
 
-    const handleCreerGestionnaire = async (e) => {
+    const handleInviter = async (e) => {
         e.preventDefault();
         setUserError('');
         setUserSuccess('');
+        setInviteLoading(true);
         try {
-            await creerGestionnaire(formUser);
-            setUserSuccess('Gestionnaire créé avec succès !');
-            setFormUser({ username: '', email: '', password: '' });
-            setShowUserForm(false);
-            fetchData();
+            await API.post('auth/invitations/', { email: inviteEmail });
+            setInviteLoading(false);
+            setUserSuccess(`Invitation envoyée à ${inviteEmail} ! Le lien expire dans 48h.`);
+            setInviteEmail('');
         } catch (err) {
-            setUserError(
-            err.response?.data?.error ||
-            'Erreur lors de la création !'
-            );
+            setInviteLoading(false);
+            setUserError(err.response?.data?.error || "Erreur lors de l'envoi de l'invitation.");
         }
     };
 
-    if (loading) return <div style={styles.loading}>Chargement...</div>;
+    const handleToggleStatut = async (u) => {
+        setActionLoading(`statut-${u.id}`);
+        try {
+            const updated = await toggleStatutUtilisateur(u.id);
+            setUtilisateurs(prev => prev.map(x => x.id === u.id ? updated : x));
+        } catch (err) {
+            setUserError(err.response?.data?.error || 'Erreur lors du changement de statut.');
+        } finally { setActionLoading(null); }
+    };
 
-    return (
-        <div style={styles.container}>
-            {/* SIDEBAR */}
-            <aside style={styles.sidebar}>
-                <div style={styles.logo}>
-                    <span>💹</span>
-                    <div>
-                        <div style={styles.logoText}>FinanceIQ</div>
-                        <div style={styles.logoSub}>Gestion Financière</div>
-                    </div>
-                </div>
-                <nav style={styles.nav}>
-                    <div style={styles.navLabel}>Principal</div>
-                    <div style={styles.navItem} onClick={() => navigate('/dashboard')}>⊞ Dashboard</div>
-                    <div style={styles.navItem} onClick={() => navigate('/transactions')}>↕ Transactions</div>
-                    <div style={styles.navItem} onClick={() => navigate('/dettes')}>📄 Dettes & Factures</div>
-                    <div style={styles.navItem} onClick={() => navigate('/budgets')}>◎ Budgets</div>
-                    <div style={styles.navLabel}>Analyse</div>
-                    <div style={styles.navItem} onClick={() => navigate('/rapports')}>📊 Rapports</div>
-                    <div style={styles.navItem} onClick={() => navigate('/alertes')}>🔔 Alertes</div>
-                    <div style={styles.navItem} onClick={() => navigate('/tiers')}>👥 Tiers</div>
-                    <div style={styles.navLabel}>Administration</div>
-                    <div style={{...styles.navItem, ...styles.navActive}}>⚙ Paramètres</div>
-                </nav>
-            </aside>
+    const handleSupprimerUser = async (u) => {
+        if (!window.confirm(`Supprimer le compte de "${u.username}" ? Cette action est irréversible.`)) return;
+        setActionLoading(`delete-${u.id}`);
+        try {
+            await supprimerUtilisateur(u.id);
+            setUtilisateurs(prev => prev.filter(x => x.id !== u.id));
+            setUserSuccess(`Compte "${u.username}" supprimé.`);
+        } catch (err) {
+            setUserError(err.response?.data?.error || 'Erreur lors de la suppression.');
+        } finally { setActionLoading(null); }
+    };
 
-            {/* MAIN */}
-            <main style={styles.main}>
-                <header style={styles.topbar}>
-                    <div>
-                        <h1 style={styles.pageTitle}>Paramètres</h1>
-                        <p style={styles.pageSub}>Administration — Accès réservé</p>
-                    </div>
-                </header>
+    const inp  = { padding:'9px 12px', background:T.surface2, border:`1px solid ${T.border}`, borderRadius:8, color:T.text, fontSize:13, outline:'none', width:'100%' };
+    const btn  = { padding:'9px 18px', background:`linear-gradient(135deg,${T.accent},#16A34A)`, border:'none', borderRadius:9, color:'#000', fontSize:13, fontWeight:700, cursor:'pointer' };
+    const btnG = { padding:'9px 18px', background:T.surface2, border:`1px solid ${T.border}`, borderRadius:9, color:T.textSoft, fontSize:13, fontWeight:600, cursor:'pointer' };
 
-                <div style={styles.content}>
-                    {/* ENTREPRISE */}
-                    <div style={styles.card}>
-                        <h2 style={styles.cardTitle}>🏢 Informations Entreprise</h2>
-                        <form onSubmit={handleSaveEntreprise}>
-                            <div style={styles.formGrid}>
-
-                <div style={styles.field}>
-                    <label style={styles.label}>Nom de l'entreprise</label>
-                        <input style={styles.input} type="text"
-                            value={formEntreprise.nom}
-                            onChange={e => setFormEntreprise({...formEntreprise, nom: e.target.value})}
-                        required />
-                </div>
-
-                <div style={styles.field}>
-                    <label style={styles.label}>Devise</label>
-                        <select style={styles.input}
-                            value={formEntreprise.devise}
-                            onChange={e => setFormEntreprise({...formEntreprise, devise: e.target.value})}>
-                            <option value="XOF">XOF — Franc CFA</option>
-                            <option value="GNF">GNF — Franc Guinéen</option>
-                            <option value="EUR">EUR — Euro</option>
-                            <option value="USD">USD — Dollar</option>
-                            <option value="MAD">MAD — Dirham</option>
-                        </select>
-                </div>
-
-                <div style={styles.field}>
-                    <label style={styles.label}>Date de création</label>
-                        <input style={styles.input} type="date"
-                            value={formEntreprise.date_creation}
-                            onChange={e => setFormEntreprise({...formEntreprise, date_creation: e.target.value})}
-                        required />
-                </div>
-
-                <div style={styles.field}>
-    <label style={styles.label}>Logo de l'entreprise</label>
-
-    {/* Aperçu de l'image */}
-    {(logoPreview || entreprise?.logo) && (
-        <img 
-            src={logoPreview || `http://127.0.0.1:8000${entreprise.logo}`}
-            alt="Logo"
-            style={{
-                width: '80px', 
-                height: '80px',
-                borderRadius: '10px',
-                marginBottom: '8px',
-                objectFit: 'cover',
-                border: '2px solid #1f2d45'
-            }}
-        />
-    )}
-
-    {/* Input caché */}
-    <input 
-        type="file" 
-        accept="image/*"
-        id="logoInput"
-        style={{display: 'none'}}
-        onChange={e => {
-            const file = e.target.files[0];
-            if (file) {
-                setFormEntreprise({...formEntreprise, logo: file});
-                setLogoPreview(URL.createObjectURL(file));
-            }
-        }}
-    />
-
-    {/* Bouton stylisé */}
-    <label htmlFor="logoInput" style={{
-    display: 'inline-block',
-    padding: '8px 16px',
-    background: 'rgba(59,130,246,0.1)',
-    border: '1px solid rgba(59,130,246,0.3)',
-    borderRadius: '8px',
-    color: '#3b82f6',
-    fontSize: '13px',
-    fontWeight: '600',
-    cursor: 'pointer',
-    marginTop: '4px'
-}}>
-    {(logoPreview || entreprise?.logo) 
-        ? '📷 Changer le logo'      
-        : '📷 Choisir un logo'      
-    }
-</label>
-</div>
-        </div>
-                            <button type="submit" style={styles.btn}>
-                                💾 Enregistrer
-                            </button>
-                        </form>
-                    </div>
-
-                    {/* CATEGORIES */}
-                    <div style={styles.card}>
-                        <h2 style={styles.cardTitle}>🏷️ Gestion des Catégories</h2>
-
-                        {/* Ajouter catégorie */}
-                        <form onSubmit={handleAddCategorie} style={styles.addForm}>
-                            <input style={{...styles.input, flex: 1}}
-                                type="text"
-                                value={newCat}
-                                onChange={e => setNewCat(e.target.value)}
-                                placeholder="Nom de la catégorie..." />
-                            <button type="submit" style={styles.btn}>
-                                ＋ Ajouter
-                            </button>
-                        </form>
-
-                        {/* Liste catégories */}
-                        <div style={styles.catList}>
-                            {categories.map(c => (
-                                <div key={c.id} style={styles.catItem}>
-                                    <span style={styles.catNom}>
-                                        🏷️ {c.nom_categorie}
-                                    </span>
-                                    <button style={styles.deleteBtn}
-                                        onClick={() => handleDeleteCategorie(c.id)}>
-                                        🗑 Supprimer
-                                    </button>
-                                </div>
-                            ))}
-                        </div>
-                    </div>
-
-                    {/* GESTION UTILISATEURS */}
-<div style={styles.card}>
-    <h2 style={styles.cardTitle}>👥 Gestion des Utilisateurs</h2>
-
-    {userSuccess && (
-        <div style={{
-            background: 'rgba(16,185,129,0.1)',
-            border: '1px solid rgba(16,185,129,0.3)',
-            color: '#10b981', padding: '12px',
-            borderRadius: '8px', marginBottom: '16px',
-            fontSize: '13px'
-        }}>
-            ✅ {userSuccess}
-        </div>
-    )}
-
-    {userError && (
-        <div style={{
-            background: 'rgba(239,68,68,0.1)',
-            border: '1px solid rgba(239,68,68,0.3)',
-            color: '#ef4444', padding: '12px',
-            borderRadius: '8px', marginBottom: '16px',
-            fontSize: '13px'
-        }}>
-            ❌ {userError}
-        </div>
-    )}
-
-    {/* Bouton créer gestionnaire */}
-    <button style={styles.btn}
-        onClick={() => setShowUserForm(!showUserForm)}>
-        ＋ Nouveau Gestionnaire
-    </button>
-
-    {/* Formulaire création */}
-    {showUserForm && (
-        <form onSubmit={handleCreerGestionnaire}
-            style={{marginTop: '20px'}}>
-            <div style={styles.formGrid}>
-                <div style={styles.field}>
-                    <label style={styles.label}>Nom d'utilisateur</label>
-                    <input style={styles.input} type="text"
-                        value={formUser.username}
-                        onChange={e => setFormUser({...formUser, username: e.target.value})}
-                        placeholder="ex: gestionnaire1"
-                        required />
-                </div>
-                <div style={styles.field}>
-                    <label style={styles.label}>Email</label>
-                    <input style={styles.input} type="email"
-                        value={formUser.email}
-                        onChange={e => setFormUser({...formUser, email: e.target.value})}
-                        placeholder="ex: gest@email.com"
-                        required />
-                </div>
-                <div style={styles.field}>
-                    <label style={styles.label}>Mot de passe</label>
-                    <input style={styles.input} type="password"
-                        value={formUser.password}
-                        onChange={e => setFormUser({...formUser, password: e.target.value})}
-                        placeholder="Minimum 6 caractères"
-                        required />
-                </div>
-            </div>
-            <div style={styles.formActions}>
-                <button type="submit" style={styles.btn}>
-                    Créer le gestionnaire
-                </button>
-                <button type="button" style={styles.btnCancel}
-                    onClick={() => setShowUserForm(false)}>
-                    Annuler
-                </button>
-            </div>
-        </form>
-    )}
-
-    {/* Liste des utilisateurs */}
-    <div style={{marginTop: '20px'}}>
-        <h3 style={{fontSize: '13px', fontWeight: '700',
-            color: '#94a3b8', marginBottom: '12px'}}>
-            Utilisateurs ({utilisateurs.length})
-        </h3>
-        {utilisateurs.length === 0 ? (
-            <p style={styles.empty}>Aucun gestionnaire créé</p>
-        ) : (
-            utilisateurs.map(u => (
-                <div key={u.id} style={{
-                    display: 'flex', alignItems: 'center',
-                    gap: '12px', padding: '12px 16px',
-                    background: '#1a2235', borderRadius: '10px',
-                    border: '1px solid #1f2d45', marginBottom: '8px'
-                }}>
-                    <div style={{
-                        width: '36px', height: '36px',
-                        borderRadius: '50%',
-                        background: 'linear-gradient(135deg, #3b82f6, #06b6d4)',
-                        display: 'flex', alignItems: 'center',
-                        justifyContent: 'center', fontSize: '14px',
-                        fontWeight: '700', flexShrink: 0
-                    }}>
-                        {u.username.charAt(0).toUpperCase()}
-                    </div>
-                    <div style={{flex: 1}}>
-                        <div style={{fontSize: '13px', fontWeight: '600',
-                            color: '#f1f5f9'}}>
-                            {u.username}
-                        </div>
-                        <div style={{fontSize: '11px', color: '#64748b'}}>
-                            {u.email} • {u.role}
-                        </div>
-                    </div>
-                    <span style={{
-                        padding: '3px 10px', borderRadius: '6px',
-                        fontSize: '11px', fontWeight: '700',
-                        background: u.statut === 'actif' ?
-                            'rgba(16,185,129,0.1)' : 'rgba(239,68,68,0.1)',
-                        color: u.statut === 'actif' ? '#10b981' : '#ef4444'
-                    }}>
-                        {u.statut}
-                    </span>
-                </div>
-            ))
-        )}
-    </div>
-</div>
-
-                                   
-                </div>
-            </main>
+    if (loading) return (
+        <div style={{ display:'flex', alignItems:'center', justifyContent:'center', height:'100vh', background:T.bg, color:T.textSoft, flexDirection:'column', gap:12 }}>
+            <style>{`@keyframes spin{to{transform:rotate(360deg);}}`}</style>
+            <div style={{ width:36, height:36, borderRadius:99, border:`3px solid ${T.surface2}`, borderTop:`3px solid ${T.accent}`, animation:'spin 0.8s linear infinite' }}/>
+            Chargement…
         </div>
     );
-}
 
-const styles = {
-    container:   { display: 'flex', minHeight: '100vh', background: '#0b0f1a', color: '#f1f5f9' },
-    loading:     { display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', background: '#0b0f1a', color: '#f1f5f9' },
-    sidebar:     { width: '240px', background: '#111827', borderRight: '1px solid #1f2d45', display: 'flex', flexDirection: 'column', padding: '28px 0', flexShrink: 0 },
-    logo:        { padding: '0 24px 24px', display: 'flex', alignItems: 'center', gap: '10px', borderBottom: '1px solid #1f2d45', marginBottom: '20px' },
-    logoText:    { fontSize: '17px', fontWeight: '800', color: '#f1f5f9' },
-    logoSub:     { fontSize: '10px', color: '#64748b', textTransform: 'uppercase' },
-    nav:         { padding: '0 16px', flex: 1 },
-    navLabel:    { fontSize: '10px', fontWeight: '700', letterSpacing: '1px', textTransform: 'uppercase', color: '#64748b', padding: '8px 8px', marginTop: '8px' },
-    navItem:     { display: 'flex', alignItems: 'center', gap: '10px', padding: '10px 12px', borderRadius: '10px', cursor: 'pointer', color: '#94a3b8', fontSize: '13.5px', fontWeight: '500', marginBottom: '2px' },
-    navActive:   { background: 'rgba(59,130,246,0.15)', color: '#3b82f6', border: '1px solid rgba(59,130,246,0.25)' },
-    main:        { flex: 1, display: 'flex', flexDirection: 'column', overflowY: 'auto' },
-    topbar:      { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '20px 32px', borderBottom: '1px solid #1f2d45' },
-    pageTitle:   { fontSize: '20px', fontWeight: '800', color: '#f1f5f9' },
-    pageSub:     { fontSize: '12px', color: '#ef4444', marginTop: '2px', fontWeight: '600' },
-    content:     { padding: '28px 32px' },
-    card:        { background: '#111827', border: '1px solid #1f2d45', borderRadius: '16px', padding: '24px', marginBottom: '20px' },
-    cardTitle:   { fontSize: '15px', fontWeight: '700', color: '#f1f5f9', marginBottom: '20px' },
-    btn:         { padding: '10px 20px', background: 'linear-gradient(135deg, #3b82f6, #06b6d4)', border: 'none', borderRadius: '10px', color: '#fff', fontSize: '13px', fontWeight: '700', cursor: 'pointer' },
-    formGrid:    { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '16px' },
-    field:       { display: 'flex', flexDirection: 'column', gap: '6px' },
-    label:       { fontSize: '12px', fontWeight: '600', color: '#94a3b8' },
-    input:       { padding: '10px 14px', background: '#1a2235', border: '1px solid #1f2d45', borderRadius: '8px', color: '#f1f5f9', fontSize: '13px', outline: 'none' },
-    addForm:     { display: 'flex', gap: '12px', marginBottom: '20px' },
-    catList:     { display: 'flex', flexDirection: 'column', gap: '8px' },
-    catItem:     { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 16px', background: '#1a2235', borderRadius: '10px', border: '1px solid #1f2d45' },
-    catNom:      { fontSize: '13.5px', fontWeight: '500', color: '#f1f5f9' },
-    deleteBtn:   { padding: '6px 12px', background: '#ef4444', border: 'none', borderRadius: '8px', cursor: 'pointer', fontSize: '14px', color: '#ffffff', fontWeight: '700' },
-};
+    return (
+        <Layout>
+            <div style={{ padding: isMobile ? '16px' : '28px 32px' }}>
+                <div style={{ marginBottom:24 }}>
+                    <h1 style={{ fontFamily:"'Calistoga',serif", fontSize:isMobile?20:24, fontWeight:400, color:T.text }}>Paramètres</h1>
+                    <p style={{ color:T.danger, fontSize:13, marginTop:4, fontWeight:600 }}>Administration — Accès réservé</p>
+                </div>
+
+                {/* ENTREPRISE */}
+                <div style={{ background:T.surface, border:`1px solid ${T.border}`, borderRadius:14, padding:'22px 24px', marginBottom:20 }}>
+                    <h2 style={{ fontSize:15, fontWeight:700, color:T.text, marginBottom:20 }}>🏢 Informations Entreprise</h2>
+                    {entSuccess && <div style={{ background:'rgba(34,197,94,0.1)', border:'1px solid rgba(34,197,94,0.3)', color:T.accent, padding:'10px 14px', borderRadius:8, marginBottom:16, fontSize:13 }}>✅ {entSuccess}</div>}
+                    <form onSubmit={handleSaveEntreprise}>
+                        <div style={{ display:'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap:14, marginBottom:14 }}>
+                            <div><label style={{ fontSize:12, fontWeight:600, color:T.textSoft, display:'block', marginBottom:6 }}>Nom de l'entreprise</label>
+                                <input style={inp} type="text" required value={formEntreprise.nom} onChange={e => setFormEntreprise(p => ({...p, nom:e.target.value}))}/></div>
+                            <div><label style={{ fontSize:12, fontWeight:600, color:T.textSoft, display:'block', marginBottom:6 }}>Devise</label>
+                                <select style={inp} value={formEntreprise.devise} onChange={e => setFormEntreprise(p => ({...p, devise:e.target.value}))}>
+                                    <option value="XOF">XOF — Franc CFA (UEMOA)</option>
+                                    <option value="XAF">XAF — Franc CFA (CEMAC)</option>
+                                    <option value="GNF">GNF — Franc Guinéen</option>
+                                    <option value="EUR">EUR — Euro</option>
+                                    <option value="USD">USD — Dollar américain</option>
+                                    <option value="MAD">MAD — Dirham marocain</option>
+                                </select></div>
+                            <div><label style={{ fontSize:12, fontWeight:600, color:T.textSoft, display:'block', marginBottom:6 }}>Date de création</label>
+                                <input style={inp} type="date" required value={formEntreprise.date_creation} onChange={e => setFormEntreprise(p => ({...p, date_creation:e.target.value}))}/></div>
+                            <div>
+                                <label style={{ fontSize:12, fontWeight:600, color:T.textSoft, display:'block', marginBottom:6 }}>Logo</label>
+                                {(logoPreview || entreprise?.logo) && (
+                                    <img src={logoPreview || `http://127.0.0.1:8000${entreprise.logo}`} alt="Logo"
+                                        style={{ width:64, height:64, borderRadius:10, objectFit:'cover', border:`2px solid ${T.border}`, display:'block', marginBottom:8 }}/>
+                                )}
+                                <input type="file" accept="image/*" id="logoInput" style={{ display:'none' }}
+                                    onChange={e => { const f = e.target.files[0]; if (f) { setFormEntreprise(p => ({...p, logo:f})); setLogoPreview(URL.createObjectURL(f)); } }}/>
+                                <label htmlFor="logoInput" style={{ display:'inline-block', padding:'7px 14px', background:`rgba(59,130,246,0.1)`, border:`1px solid rgba(59,130,246,0.3)`, borderRadius:8, color:T.info, fontSize:12, fontWeight:600, cursor:'pointer' }}>
+                                    📷 {logoPreview || entreprise?.logo ? 'Changer le logo' : 'Choisir un logo'}
+                                </label>
+                            </div>
+                        </div>
+                        <button type="submit" style={btn}>💾 Enregistrer</button>
+                    </form>
+                </div>
+
+                {/* CATEGORIES */}
+                <div style={{ background:T.surface, border:`1px solid ${T.border}`, borderRadius:14, padding:'22px 24px', marginBottom:20 }}>
+                    <h2 style={{ fontSize:15, fontWeight:700, color:T.text, marginBottom:18 }}>🏷 Gestion des Catégories</h2>
+                    <form onSubmit={handleAddCategorie} style={{ display:'flex', gap:10, marginBottom:18 }}>
+                        <input style={{ ...inp, flex:1 }} type="text" value={newCat} onChange={e => setNewCat(e.target.value)} placeholder="Nom de la nouvelle catégorie…"/>
+                        <button type="submit" style={btn}>＋ Ajouter</button>
+                    </form>
+                    <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
+                        {categories.length === 0
+                            ? <p style={{ color:T.muted, fontSize:13, textAlign:'center', padding:'20px 0' }}>Aucune catégorie créée.</p>
+                            : categories.map(c => (
+                                <div key={c.id} style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'12px 16px', background:T.surface2, borderRadius:10, border:`1px solid ${T.border}` }}>
+                                    <span style={{ fontSize:13, fontWeight:500, color:T.text }}>🏷 {c.nom_categorie}</span>
+                                    <button onClick={() => handleDeleteCategorie(c.id)} style={{ padding:'5px 12px', background:'rgba(239,68,68,0.1)', border:'1px solid rgba(239,68,68,0.2)', borderRadius:7, color:T.danger, fontSize:12, fontWeight:700, cursor:'pointer' }}>🗑 Supprimer</button>
+                                </div>
+                            ))
+                        }
+                    </div>
+                </div>
+
+                {/* UTILISATEURS */}
+                <div style={{ background:T.surface, border:`1px solid ${T.border}`, borderRadius:14, padding:'22px 24px' }}>
+                    <h2 style={{ fontSize:15, fontWeight:700, color:T.text, marginBottom:18 }}>👥 Gestion des Utilisateurs</h2>
+
+                    {userSuccess && <div style={{ background:'rgba(34,197,94,0.1)', border:'1px solid rgba(34,197,94,0.3)', color:T.accent, padding:'10px 14px', borderRadius:8, marginBottom:14, fontSize:13 }}>✅ {userSuccess}</div>}
+                    {userError   && <div style={{ background:'rgba(239,68,68,0.1)', border:'1px solid rgba(239,68,68,0.3)', color:T.danger, padding:'10px 14px', borderRadius:8, marginBottom:14, fontSize:13 }}>❌ {userError}</div>}
+
+                    {/* FORMULAIRE D'INVITATION */}
+                    <form onSubmit={handleInviter} style={{ background:T.surface2, border:`1px solid ${T.border}`, borderRadius:12, padding:'18px 20px', marginBottom:24 }}>
+                        <p style={{ fontSize:13, fontWeight:700, color:T.text, marginBottom:4 }}>📧 Inviter un gestionnaire</p>
+                        <p style={{ fontSize:12, color:T.muted, marginBottom:14 }}>Un email avec un lien d'activation sera envoyé. Le lien expire après 48h.</p>
+                        <div style={{ display:'flex', gap:10, flexWrap:'wrap' }}>
+                            <input style={{ ...inp, flex:1, minWidth:200 }} type="email" required
+                                placeholder="email@exemple.com"
+                                value={inviteEmail}
+                                onChange={e => setInviteEmail(e.target.value)}/>
+                            <button type="submit" disabled={inviteLoading}
+                                style={{ ...btn, opacity: inviteLoading ? 0.6 : 1, cursor: inviteLoading ? 'not-allowed' : 'pointer' }}>
+                                {inviteLoading ? '⏳ Envoi…' : '✉️ Envoyer l\'invitation'}
+                            </button>
+                        </div>
+                    </form>
+
+                    <h3 style={{ fontSize:13, fontWeight:700, color:T.textSoft, marginBottom:12 }}>Utilisateurs ({utilisateurs.length})</h3>
+                    {utilisateurs.length === 0
+                        ? <p style={{ color:T.muted, fontSize:13, textAlign:'center', padding:'20px 0' }}>Aucun utilisateur trouvé.</p>
+                        : <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
+                            {utilisateurs.map(u => {
+                                const isMe      = currentUser?.id === u.id;
+                                const isAdmin   = u.role === 'admin';
+                                const isActif   = u.statut === 'actif';
+                                const loadingStatut = actionLoading === `statut-${u.id}`;
+                                const loadingDelete = actionLoading === `delete-${u.id}`;
+                                return (
+                                    <div key={u.id} style={{ display:'flex', alignItems:'center', gap:12, padding:'12px 16px', background:T.surface2, borderRadius:10, border:`1px solid ${T.border}`, flexWrap: isMobile ? 'wrap' : 'nowrap' }}>
+                                        <div style={{ width:36, height:36, borderRadius:'50%', background: isAdmin ? `linear-gradient(135deg,#3B82F6,#1D4ED8)` : `linear-gradient(135deg,${T.accent},#16A34A)`, display:'flex', alignItems:'center', justifyContent:'center', fontSize:15, fontWeight:700, color:'#fff', flexShrink:0 }}>
+                                            {(u.username||'?').charAt(0).toUpperCase()}
+                                        </div>
+                                        <div style={{ flex:1, minWidth:0 }}>
+                                            <p style={{ fontSize:13, fontWeight:600, color:T.text }}>
+                                                {u.username} {isMe && <span style={{ fontSize:11, color:T.muted }}>(vous)</span>}
+                                            </p>
+                                            <p style={{ fontSize:11, color:T.muted }}>{u.email} · {isAdmin ? 'Administrateur' : 'Gestionnaire'}</p>
+                                        </div>
+                                        <span style={{ padding:'3px 10px', borderRadius:6, fontSize:11, fontWeight:700, background:isActif?'rgba(34,197,94,0.1)':'rgba(239,68,68,0.1)', color:isActif?T.accent:T.danger, whiteSpace:'nowrap' }}>
+                                            {isActif ? 'Actif' : 'Inactif'}
+                                        </span>
+                                        {!isMe && !isAdmin && (
+                                            <div style={{ display:'flex', gap:6, flexShrink:0 }}>
+                                                <button
+                                                    onClick={() => handleToggleStatut(u)}
+                                                    disabled={!!actionLoading}
+                                                    style={{ padding:'5px 11px', background: isActif ? 'rgba(234,179,8,0.1)' : 'rgba(34,197,94,0.1)', border: `1px solid ${isActif ? 'rgba(234,179,8,0.3)' : 'rgba(34,197,94,0.3)'}`, borderRadius:7, color: isActif ? '#FBBF24' : T.accent, fontSize:11, fontWeight:700, cursor:'pointer', whiteSpace:'nowrap' }}>
+                                                    {loadingStatut ? '⏳' : isActif ? 'Désactiver' : 'Activer'}
+                                                </button>
+                                                <button
+                                                    onClick={() => handleSupprimerUser(u)}
+                                                    disabled={!!actionLoading}
+                                                    style={{ padding:'5px 11px', background:'rgba(239,68,68,0.1)', border:'1px solid rgba(239,68,68,0.2)', borderRadius:7, color:T.danger, fontSize:11, fontWeight:700, cursor:'pointer' }}>
+                                                    {loadingDelete ? '⏳' : '🗑'}
+                                                </button>
+                                            </div>
+                                        )}
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    }
+                </div>
+            </div>
+        </Layout>
+    );
+}

@@ -1,4 +1,3 @@
-import { data } from 'react-router-dom';
 import API from './axios';
 
 export const login = async (username, password) => {
@@ -21,4 +20,13 @@ export const getUtilisateurs = async () => {
 export const creerGestionnaire = async (data) => {
     const response = await API.post('auth/utilisateurs/', data);
     return response.data;
-}
+};
+
+export const toggleStatutUtilisateur = async (id) => {
+    const response = await API.patch(`auth/utilisateurs/${id}/`);
+    return response.data;
+};
+
+export const supprimerUtilisateur = async (id) => {
+    await API.delete(`auth/utilisateurs/${id}/`);
+};

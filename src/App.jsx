@@ -11,6 +11,9 @@ import Alertes from './pages/Alertes';
 import RoleRoute from './utils/RoleRoute';
 import Parametres from './pages/Parametres';
 import Inscription from './pages/Inscription';
+import Activation from './pages/Activation';
+import Guide from './pages/Guide';
+import Caisse from './pages/Caisse';
 
 
 function PrivateRoute({ children }) {
@@ -18,11 +21,17 @@ function PrivateRoute({ children }) {
     return isAuthenticated ? children : <Navigate to="/login" />;
 }
 
+// Redirige les utilisateurs déjà connectés vers le dashboard
+function PublicOnlyRoute({ children }) {
+    const { isAuthenticated } = useSelector((state) => state.auth);
+    return isAuthenticated ? <Navigate to="/dashboard" /> : children;
+}
+
 export default function App() {
     return (
         <BrowserRouter>
             <Routes>
-                <Route path="/login" element={<Login />} />
+                <Route path="/login" element={<PublicOnlyRoute><Login /></PublicOnlyRoute>} />
                 <Route path="/" element={<Navigate to="/login" />} />
 
                 {/* Tous les rôles */}
@@ -84,8 +93,11 @@ export default function App() {
 } />
 
     <Route path="/inscription" element={
-        <Inscription />
+        <PublicOnlyRoute><Inscription /></PublicOnlyRoute>
 } />
+    <Route path="/activation/:token" element={<Activation />} />
+    <Route path="/guide"   element={<PrivateRoute><Guide /></PrivateRoute>} />
+    <Route path="/caisse" element={<PrivateRoute><Caisse /></PrivateRoute>} />
             </Routes>
         </BrowserRouter>
     );

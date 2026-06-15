@@ -1,34 +1,39 @@
 import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { getDettes, createDette, updateDette } from '../api/dettesAPI';
+import { getDettes, createDette, updateDette, envoyerRappelDette } from '../api/dettesAPI';
 import { getTiers } from '../api/tiersAPI';
+import Layout, { T, useIsMobile } from '../components/Layout';
+
+const STATUT_LABEL = { en_cours:'En cours', partiellement_paye:'Part. payé', solde:'Soldé', en_retard:'En retard' };
+const STATUT_COLOR = { en_cours:T.info, partiellement_paye:'#F59E0B', solde:'#22C55E', en_retard:'#EF4444' };
 
 export default function Dettes() {
-    const navigate = useNavigate();
-    const [dettes, setDettes]     = useState([]);
-    const [tiers, setTiers]       = useState([]);
-    const [loading, setLoading]   = useState(true);
-    const [showForm, setShowForm] = useState(false);
-    const [form, setForm] = useState({
-        type: 'Client',
-        montant_total: '',
-        montant_paye: '0',
-        date_echeance: '',
-        id_tiers: '',
-    });
+    const isMobile = useIsMobile();
+    const [dettes, setDettes]       = useState([]);
+    const [tiers, setTiers]         = useState([]);
+    const [loading, setLoading]     = useState(true);
+    const [showForm, setShowForm]   = useState(false);
+    const [filtre, setFiltre]       = useState('');
+    const [form, setForm] = useState({ type:'Client', montant_total:'', montant_paye:'0', date_echeance:'', id_tiers:'' });
+
+    // Rappels
+    const [rappelLoading, setRappelLoading] = useState({});
+    const [rappelMsg, setRappelMsg]         = useState({});
+
+    // Modal de paiement
+    const [paiementModal, setPaiementModal]       = useState(null);
+    const [montantPaiement, setMontantPaiement]   = useState('');
+    const [paiementLoading, setPaiementLoading]   = useState(false);
+    const [paiementError, setPaiementError]       = useState('');
 
     useEffect(() => { fetchData(); }, []);
 
     const fetchData = async () => {
         try {
             const [d, t] = await Promise.all([getDettes(), getTiers()]);
-            setDettes(d);
+            setDettes(Array.isArray(d) ? d : (d.results || []));
             setTiers(t);
-        } catch (err) {
-            console.error(err);
-        } finally {
-            setLoading(false);
-        }
+        } catch (err) { console.error(err); }
+        finally { setLoading(false); }
     };
 
     const handleSubmit = async (e) => {
@@ -36,230 +41,297 @@ export default function Dettes() {
         try {
             await createDette(form);
             setShowForm(false);
-            setForm({ type: 'Client', montant_total: '', montant_paye: '0', date_echeance: '', id_tiers: '' });
+            setForm({ type:'Client', montant_total:'', montant_paye:'0', date_echeance:'', id_tiers:'' });
             fetchData();
+        } catch (err) { console.error(err); }
+    };
+
+    const handleRappel = async (dette) => {
+        setRappelLoading(p => ({ ...p, [dette.id]: true }));
+        setRappelMsg(p => ({ ...p, [dette.id]: null }));
+        try {
+            const res = await envoyerRappelDette(dette.id);
+            setRappelMsg(p => ({ ...p, [dette.id]: { type: 'ok', texte: res.message || res.warning } }));
         } catch (err) {
-            console.error(err);
+            const msg = err.response?.data?.error || 'Erreur lors de l\'envoi.';
+            setRappelMsg(p => ({ ...p, [dette.id]: { type: 'err', texte: msg } }));
+        } finally {
+            setRappelLoading(p => ({ ...p, [dette.id]: false }));
         }
     };
 
-    const handlePaiement = async (dette) => {
-        const montant = prompt('Montant du paiement :');
-        if (!montant) return;
-        const nouveauMontantPaye = parseFloat(dette.montant_paye) + parseFloat(montant);
-        const statut = nouveauMontantPaye >= parseFloat(dette.montant_total) ? 'solde' : 'partiellement_paye';
-        await updateDette(dette.id, {
-            montant_paye: nouveauMontantPaye,
-            statut: statut
-        });
-        fetchData();
+    const ouvrirPaiement = (dette) => {
+        setPaiementModal(dette);
+        setMontantPaiement('');
+        setPaiementError('');
     };
 
-    const getStatutColor = (statut) => {
-        switch(statut) {
-            case 'solde':              return '#10b981';
-            case 'en_retard':         return '#ef4444';
-            case 'partiellement_paye': return '#f59e0b';
-            default:                  return '#3b82f6';
+    const fermerPaiement = () => {
+        if (paiementLoading) return;
+        setPaiementModal(null);
+        setMontantPaiement('');
+        setPaiementError('');
+    };
+
+    const handleConfirmerPaiement = async () => {
+        const montant  = parseFloat(montantPaiement);
+        const restant  = parseFloat(paiementModal.montant_total) - parseFloat(paiementModal.montant_paye || 0);
+
+        if (!montantPaiement || isNaN(montant) || montant <= 0) {
+            setPaiementError('Veuillez saisir un montant valide.');
+            return;
+        }
+        if (montant > restant + 0.01) {
+            setPaiementError(`Le montant dépasse le restant dû (${restant.toLocaleString('fr-FR')} XOF).`);
+            return;
+        }
+
+        setPaiementLoading(true);
+        setPaiementError('');
+        try {
+            const nouveauMontantPaye = parseFloat(paiementModal.montant_paye || 0) + montant;
+            const statut = nouveauMontantPaye >= parseFloat(paiementModal.montant_total) - 0.01 ? 'solde' : 'partiellement_paye';
+            await updateDette(paiementModal.id, { montant_paye: nouveauMontantPaye, statut });
+            setPaiementModal(null);
+            setMontantPaiement('');
+            fetchData();
+        } catch {
+            setPaiementError('Une erreur est survenue. Veuillez réessayer.');
+        } finally {
+            setPaiementLoading(false);
         }
     };
 
-    if (loading) return <div style={styles.loading}>Chargement...</div>;
+    const getTiersNom = (id) => tiers.find(t => t.id === id || t.id === parseInt(id))?.nom || `Tiers #${id}`;
 
-    return (
-        <div style={styles.container}>
-            {/* SIDEBAR */}
-            <aside style={styles.sidebar}>
-                <div style={styles.logo}>
-                    <span>💹</span>
-                    <div>
-                        <div style={styles.logoText}>FinanceIQ</div>
-                        <div style={styles.logoSub}>Gestion Financière</div>
-                    </div>
-                </div>
-                <nav style={styles.nav}>
-                    <div style={styles.navLabel}>Principal</div>
-                    <div style={styles.navItem} onClick={() => navigate('/dashboard')}>⊞ Dashboard</div>
-                    <div style={styles.navItem} onClick={() => navigate('/transactions')}>↕ Transactions</div>
-                    <div style={{...styles.navItem, ...styles.navActive}}>📄 Dettes & Factures</div>
-                    <div style={styles.navItem} onClick={() => navigate('/budgets')}>◎ Budgets</div>
-                    <div style={styles.navLabel}>Analyse</div>
-                    <div style={styles.navItem} onClick={() => navigate('/rapports')}>📊 Rapports</div>
-                    <div style={styles.navItem} onClick={() => navigate('/alertes')}>🔔 Alertes</div>
-                    <div style={styles.navItem} onClick={() => navigate('/tiers')}>👥 Tiers</div>
-                    <div style={styles.navItem} onClick={() => navigate('/parametres')}> ⚙ Paramètres </div>
+    const filtered = filtre ? dettes.filter(d => d.statut === filtre) : dettes;
+    const totalDu  = dettes.filter(d => d.statut !== 'solde').reduce((s,d) => s + (parseFloat(d.montant_total)-parseFloat(d.montant_paye||0)), 0);
 
-                </nav>
-            </aside>
+    const inp  = { padding:'9px 12px', background:T.surface2, border:`1px solid ${T.border}`, borderRadius:8, color:T.text, fontSize:13, outline:'none', width:'100%' };
+    const btn  = { padding:'9px 18px', background:`linear-gradient(135deg,${T.accent},#16A34A)`, border:'none', borderRadius:9, color:'#000', fontSize:13, fontWeight:700, cursor:'pointer' };
+    const btnG = { padding:'9px 18px', background:T.surface2, border:`1px solid ${T.border}`, borderRadius:9, color:T.textSoft, fontSize:13, fontWeight:600, cursor:'pointer' };
 
-            {/* MAIN */}
-            <main style={styles.main}>
-                <header style={styles.topbar}>
-                    <div>
-                        <h1 style={styles.pageTitle}>Dettes & Factures</h1>
-                        <p style={styles.pageSub}>Suivi des créances et dettes</p>
-                    </div>
-                    <button style={styles.btn} onClick={() => setShowForm(!showForm)}>
-                        ＋ Nouvelle Dette
-                    </button>
-                </header>
-
-                <div style={styles.content}>
-                    {/* FORMULAIRE */}
-                    {showForm && (
-                        <div style={styles.card}>
-                            <h2 style={styles.cardTitle}>Nouvelle Dette / Facture</h2>
-                            <form onSubmit={handleSubmit}>
-                                <div style={styles.formGrid}>
-                                    <div style={styles.field}>
-                                        <label style={styles.label}>Type</label>
-                                        <select style={styles.input}
-                                            value={form.type}
-                                            onChange={e => setForm({...form, type: e.target.value})}>
-                                            <option value="Client">Client</option>
-                                            <option value="Fournisseur">Fournisseur</option>
-                                        </select>
-                                    </div>
-                                    <div style={styles.field}>
-                                        <label style={styles.label}>Tiers</label>
-                                        <select style={styles.input}
-                                            value={form.id_tiers}
-                                            onChange={e => setForm({...form, id_tiers: e.target.value})}
-                                            required>
-                                            <option value="">Choisir...</option>
-                                            {tiers.map(t => (
-                                                <option key={t.id} value={t.id}>
-                                                    {t.nom} ({t.type})
-                                                </option>
-                                            ))}
-                                        </select>
-                                    </div>
-                                    <div style={styles.field}>
-                                        <label style={styles.label}>Montant Total (XOF)</label>
-                                        <input style={styles.input} type="number"
-                                            value={form.montant_total}
-                                            onChange={e => setForm({...form, montant_total: e.target.value})}
-                                            required />
-                                    </div>
-                                    <div style={styles.field}>
-                                        <label style={styles.label}>Date Échéance</label>
-                                        <input style={styles.input} type="date"
-                                            value={form.date_echeance}
-                                            onChange={e => setForm({...form, date_echeance: e.target.value})}
-                                            required />
-                                    </div>
-                                </div>
-                                <div style={styles.formActions}>
-                                    <button type="submit" style={styles.btn}>Enregistrer</button>
-                                    <button type="button" style={styles.btnCancel}
-                                        onClick={() => setShowForm(false)}>Annuler</button>
-                                </div>
-                            </form>
-                        </div>
-                    )}
-
-                    {/* CARDS DETTES */}
-                    <div style={styles.detteGrid}>
-                        {dettes.length === 0 ? (
-                            <p style={styles.empty}>Aucune dette pour le moment</p>
-                        ) : (
-                            dettes.map(d => {
-                                const taux = Math.min(
-                                    (parseFloat(d.montant_paye) / parseFloat(d.montant_total)) * 100, 100
-                                );
-                                const tiersTrouve = tiers.find(t => t.id === d.id_tiers);
-                                return (
-                                    <div key={d.id} style={styles.detteCard}>
-                                        <div style={styles.detteHead}>
-                                            <div>
-                                                <div style={styles.detteTiers}>
-                                                    {tiersTrouve ? tiersTrouve.nom : `Tiers #${d.id_tiers}`}
-                                                </div>
-                                                <div style={styles.detteType}>
-                                                    {d.type === 'Client' ? '📤 Créance' : '📥 Dette'}
-                                                </div>
-                                            </div>
-                                            <span style={{
-                                                ...styles.statutBadge,
-                                                background: `${getStatutColor(d.statut)}22`,
-                                                color: getStatutColor(d.statut)
-                                            }}>
-                                                {d.statut.replace('_', ' ')}
-                                            </span>
-                                        </div>
-                                        <div style={styles.detteAmount}>
-                                            {parseFloat(d.montant_total).toLocaleString()} XOF
-                                        </div>
-                                        <div style={styles.progTrack}>
-                                            <div style={{
-                                                ...styles.progFill,
-                                                width: `${taux}%`,
-                                                background: getStatutColor(d.statut)
-                                            }}/>
-                                        </div>
-                                        <div style={styles.dettePaye}>
-                                            Payé : {parseFloat(d.montant_paye).toLocaleString()} XOF ({taux.toFixed(0)}%)
-                                        </div>
-                                        <div style={styles.detteFooter}>
-                                            <span style={styles.echeance}>
-                                                Échéance : {d.date_echeance}
-                                            </span>
-                                            {d.statut !== 'solde' && (
-                                                <button style={styles.payBtn}
-                                                    onClick={() => handlePaiement(d)}>
-                                                     {d.type === 'Client' ? '💰 Marquer reçu' : '💸 Effectuer paiement'}
-
-                                                </button>
-                                            )}
-                                        </div>
-                                    </div>
-                                );
-                            })
-                        )}
-                    </div>
-                </div>
-            </main>
+    if (loading) return (
+        <div style={{ display:'flex', alignItems:'center', justifyContent:'center', height:'100vh', background:T.bg, color:T.textSoft, flexDirection:'column', gap:12 }}>
+            <style>{`@keyframes spin{to{transform:rotate(360deg);}}`}</style>
+            <div style={{ width:36, height:36, borderRadius:99, border:`3px solid ${T.surface2}`, borderTop:`3px solid ${T.accent}`, animation:'spin 0.8s linear infinite' }}/>
+            Chargement…
         </div>
     );
-}
 
-const styles = {
-    container:    { display: 'flex', minHeight: '100vh', background: '#0b0f1a', color: '#f1f5f9' },
-    loading:      { display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', background: '#0b0f1a', color: '#f1f5f9' },
-    sidebar:      { width: '240px', background: '#111827', borderRight: '1px solid #1f2d45', display: 'flex', flexDirection: 'column', padding: '28px 0', flexShrink: 0 },
-    logo:         { padding: '0 24px 24px', display: 'flex', alignItems: 'center', gap: '10px', borderBottom: '1px solid #1f2d45', marginBottom: '20px' },
-    logoText:     { fontSize: '17px', fontWeight: '800', color: '#f1f5f9' },
-    logoSub:      { fontSize: '10px', color: '#64748b', textTransform: 'uppercase' },
-    nav:          { padding: '0 16px', flex: 1 },
-    navLabel:     { fontSize: '10px', fontWeight: '700', letterSpacing: '1px', textTransform: 'uppercase', color: '#64748b', padding: '8px 8px', marginTop: '8px' },
-    navItem:      { display: 'flex', alignItems: 'center', gap: '10px', padding: '10px 12px', borderRadius: '10px', cursor: 'pointer', color: '#94a3b8', fontSize: '13.5px', fontWeight: '500', marginBottom: '2px' },
-    navActive:    { background: 'rgba(59,130,246,0.15)', color: '#3b82f6', border: '1px solid rgba(59,130,246,0.25)' },
-    main:         { flex: 1, display: 'flex', flexDirection: 'column', overflowY: 'auto' },
-    topbar:       { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '20px 32px', borderBottom: '1px solid #1f2d45' },
-    pageTitle:    { fontSize: '20px', fontWeight: '800', color: '#f1f5f9' },
-    pageSub:      { fontSize: '12px', color: '#64748b', marginTop: '2px' },
-    content:      { padding: '28px 32px' },
-    card:         { background: '#111827', border: '1px solid #1f2d45', borderRadius: '16px', padding: '24px', marginBottom: '20px' },
-    cardTitle:    { fontSize: '15px', fontWeight: '700', color: '#f1f5f9', marginBottom: '16px' },
-    btn:          { padding: '10px 20px', background: 'linear-gradient(135deg, #3b82f6, #06b6d4)', border: 'none', borderRadius: '10px', color: '#fff', fontSize: '13px', fontWeight: '700', cursor: 'pointer' },
-    btnCancel:    { padding: '10px 20px', background: '#1a2235', border: '1px solid #1f2d45', borderRadius: '10px', color: '#94a3b8', fontSize: '13px', fontWeight: '700', cursor: 'pointer', marginLeft: '10px' },
-    formGrid:     { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '16px' },
-    field:        { display: 'flex', flexDirection: 'column', gap: '6px' },
-    label:        { fontSize: '12px', fontWeight: '600', color: '#94a3b8' },
-    input:        { padding: '10px 14px', background: '#1a2235', border: '1px solid #1f2d45', borderRadius: '8px', color: '#f1f5f9', fontSize: '13px', outline: 'none' },
-    formActions:  { display: 'flex', gap: '10px', marginTop: '8px' },
-    empty:        { color: '#64748b', fontSize: '14px', textAlign: 'center', padding: '20px' },
-    detteGrid:    { display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '16px' },
-    detteCard:    { background: '#111827', border: '1px solid #1f2d45', borderRadius: '14px', padding: '20px' },
-    detteHead:    { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '14px' },
-    detteTiers:   { fontSize: '14px', fontWeight: '700', color: '#f1f5f9' },
-    detteType:    { fontSize: '12px', color: '#64748b', marginTop: '3px' },
-    statutBadge:  { padding: '4px 10px', borderRadius: '7px', fontSize: '11px', fontWeight: '700' },
-    detteAmount:  { fontSize: '22px', fontWeight: '700', color: '#f1f5f9', marginBottom: '12px', fontFamily: 'monospace' },
-    progTrack:    { height: '6px', background: '#1a2235', borderRadius: '10px', overflow: 'hidden', marginBottom: '8px' },
-    progFill:     { height: '100%', borderRadius: '10px' },
-    dettePaye:    { fontSize: '12px', color: '#64748b', marginBottom: '12px' },
-    detteFooter:  { display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px solid #1f2d45', paddingTop: '12px' },
-    echeance:     { fontSize: '12px', color: '#64748b' },
-    payBtn:       { padding: '6px 14px', background: 'rgba(59,130,246,0.1)', border: '1px solid rgba(59,130,246,0.25)', borderRadius: '8px', color: '#3b82f6', fontSize: '12px', fontWeight: '700', cursor: 'pointer' },
-};
+    const restantModal = paiementModal
+        ? parseFloat(paiementModal.montant_total) - parseFloat(paiementModal.montant_paye || 0)
+        : 0;
+
+    return (
+        <Layout>
+            <div style={{ padding: isMobile ? '16px' : '28px 32px' }}>
+                <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:24 }}>
+                    <div>
+                        <h1 style={{ fontFamily:"'Calistoga',serif", fontSize:isMobile?20:24, fontWeight:400, color:T.text }}>Dettes & Factures</h1>
+                        <p style={{ color:T.textSoft, fontSize:13, marginTop:4 }}>{dettes.length} enregistrement{dettes.length>1?'s':''}</p>
+                    </div>
+                    <button style={btn} onClick={() => setShowForm(p => !p)}>{isMobile ? '＋' : '＋ Nouvelle Dette'}</button>
+                </div>
+
+                {/* KPI */}
+                <div style={{ display:'grid', gridTemplateColumns: isMobile ? '1fr 1fr' : '1fr 1fr 1fr 1fr', gap:14, marginBottom:20 }}>
+                    {[
+                        { label:'Total', val:dettes.length, color:T.info, suf:'' },
+                        { label:'En cours', val:dettes.filter(d=>d.statut==='en_cours').length, color:T.info, suf:'' },
+                        { label:'En retard', val:dettes.filter(d=>d.statut==='en_retard').length, color:T.danger, suf:'' },
+                        { label:'Restant dû', val:totalDu, color:T.warning, suf:' XOF', fmt:true },
+                    ].map(k => (
+                        <div key={k.label} style={{ background:T.surface, border:`1px solid ${T.border}`, borderRadius:12, padding:'16px 18px' }}>
+                            <p style={{ fontSize:11, color:T.textSoft, marginBottom:6, textTransform:'uppercase', letterSpacing:'0.06em' }}>{k.label}</p>
+                            <p style={{ fontSize:k.fmt?16:22, fontWeight:700, color:k.color, fontFamily:'monospace' }}>
+                                {k.fmt ? k.val.toLocaleString('fr-FR') : k.val}{k.suf}
+                            </p>
+                        </div>
+                    ))}
+                </div>
+
+                {/* FILTRE */}
+                <div style={{ display:'flex', gap:8, marginBottom:20, flexWrap:'wrap' }}>
+                    {['', 'en_cours', 'partiellement_paye', 'solde', 'en_retard'].map(s => (
+                        <button key={s} onClick={() => setFiltre(s)} style={{ padding:'7px 14px', borderRadius:8, border:`1px solid ${filtre===s?T.accent:T.border}`, background:filtre===s?T.accentDim:'transparent', color:filtre===s?T.accent:T.textSoft, fontSize:12, fontWeight:600, cursor:'pointer' }}>
+                            {s === '' ? 'Tous' : STATUT_LABEL[s]}
+                        </button>
+                    ))}
+                </div>
+
+                {showForm && (
+                    <div style={{ background:T.surface, border:`1px solid ${T.border}`, borderRadius:14, padding:'22px 24px', marginBottom:20 }}>
+                        <h2 style={{ fontSize:15, fontWeight:700, color:T.text, marginBottom:18 }}>Nouvelle Dette / Facture</h2>
+                        <form onSubmit={handleSubmit}>
+                            <div style={{ display:'grid', gridTemplateColumns: isMobile ? '1fr 1fr' : '1fr 1fr 1fr 1fr', gap:14, marginBottom:14 }}>
+                                <div><label style={{ fontSize:12, fontWeight:600, color:T.textSoft, display:'block', marginBottom:6 }}>Type</label>
+                                    <select style={inp} value={form.type} onChange={e => setForm(p => ({...p, type:e.target.value}))}>
+                                        <option value="Client">Client (créance)</option>
+                                        <option value="Fournisseur">Fournisseur (dette)</option>
+                                    </select></div>
+                                <div><label style={{ fontSize:12, fontWeight:600, color:T.textSoft, display:'block', marginBottom:6 }}>Tiers</label>
+                                    <select style={inp} required value={form.id_tiers} onChange={e => setForm(p => ({...p, id_tiers:e.target.value}))}>
+                                        <option value="">Choisir...</option>
+                                        {tiers.map(t => <option key={t.id} value={t.id}>{t.nom} ({t.type})</option>)}
+                                    </select></div>
+                                <div><label style={{ fontSize:12, fontWeight:600, color:T.textSoft, display:'block', marginBottom:6 }}>Montant total (XOF)</label>
+                                    <input style={inp} type="number" min="0" required value={form.montant_total} onChange={e => setForm(p => ({...p, montant_total:e.target.value}))}/></div>
+                                <div><label style={{ fontSize:12, fontWeight:600, color:T.textSoft, display:'block', marginBottom:6 }}>Date échéance</label>
+                                    <input style={inp} type="date" required value={form.date_echeance} onChange={e => setForm(p => ({...p, date_echeance:e.target.value}))}/></div>
+                            </div>
+                            <div style={{ display:'flex', gap:10 }}>
+                                <button type="submit" style={btn}>Enregistrer</button>
+                                <button type="button" style={btnG} onClick={() => setShowForm(false)}>Annuler</button>
+                            </div>
+                        </form>
+                    </div>
+                )}
+
+                {/* CARDS */}
+                {filtered.length === 0
+                    ? <div style={{ background:T.surface, border:`1px solid ${T.border}`, borderRadius:14, padding:'40px', textAlign:'center', color:T.muted }}>Aucune dette pour ce filtre.</div>
+                    : <div style={{ display:'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(3,1fr)', gap:16 }}>
+                        {filtered.map(d => {
+                            const taux    = Math.min((parseFloat(d.montant_paye||0)/parseFloat(d.montant_total||1))*100, 100);
+                            const color   = STATUT_COLOR[d.statut] || T.muted;
+                            const restant = parseFloat(d.montant_total) - parseFloat(d.montant_paye||0);
+                            return (
+                                <div key={d.id} style={{ background:T.surface, border:`1px solid ${T.border}`, borderRadius:14, padding:'18px 20px' }}>
+                                    <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:12 }}>
+                                        <div>
+                                            <p style={{ fontSize:14, fontWeight:700, color:T.text }}>{getTiersNom(d.id_tiers)}</p>
+                                            <p style={{ fontSize:12, color:T.muted, marginTop:2 }}>{d.type==='Client'?'📤 Créance':'📥 Dette'}</p>
+                                        </div>
+                                        <span style={{ padding:'3px 10px', borderRadius:6, fontSize:11, fontWeight:700, background:`${color}22`, color }}>
+                                            {STATUT_LABEL[d.statut]||d.statut}
+                                        </span>
+                                    </div>
+                                    <p style={{ fontSize:22, fontWeight:700, color:T.text, fontFamily:'monospace', marginBottom:10 }}>
+                                        {parseFloat(d.montant_total).toLocaleString('fr-FR')} XOF
+                                    </p>
+                                    <div style={{ height:5, background:T.surface2, borderRadius:99, overflow:'hidden', marginBottom:6 }}>
+                                        <div style={{ height:'100%', background:color, borderRadius:99, width:`${taux}%`, transition:'width 1s' }}/>
+                                    </div>
+                                    <div style={{ display:'flex', justifyContent:'space-between', marginBottom:12 }}>
+                                        <span style={{ fontSize:12, color:T.muted }}>Payé : {parseFloat(d.montant_paye||0).toLocaleString('fr-FR')} XOF ({taux.toFixed(0)}%)</span>
+                                        <span style={{ fontSize:12, color:T.warning, fontWeight:600 }}>Reste : {restant.toLocaleString('fr-FR')} XOF</span>
+                                    </div>
+                                    <div style={{ borderTop:`1px solid ${T.border}`, paddingTop:12 }}>
+                                        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom: rappelMsg[d.id] ? 8 : 0 }}>
+                                            <span style={{ fontSize:11, color:T.muted }}>Échéance : {new Date(d.date_echeance).toLocaleDateString('fr-FR')}</span>
+                                            <div style={{ display:'flex', gap:6 }}>
+                                                {d.statut !== 'solde' && (
+                                                    <button
+                                                        onClick={() => handleRappel(d)}
+                                                        disabled={rappelLoading[d.id]}
+                                                        title="Envoyer un rappel par email"
+                                                        style={{ padding:'5px 10px', background:'rgba(139,92,246,0.1)', border:'1px solid rgba(139,92,246,0.25)', borderRadius:7, color:'#8B5CF6', fontSize:12, fontWeight:700, cursor:'pointer', opacity: rappelLoading[d.id] ? 0.6 : 1 }}
+                                                    >
+                                                        {rappelLoading[d.id] ? '...' : '📧'}
+                                                    </button>
+                                                )}
+                                                {d.statut !== 'solde' && (
+                                                    <button onClick={() => ouvrirPaiement(d)} style={{ padding:'5px 12px', background:`rgba(59,130,246,0.1)`, border:`1px solid rgba(59,130,246,0.25)`, borderRadius:7, color:T.info, fontSize:12, fontWeight:700, cursor:'pointer' }}>
+                                                        {d.type==='Client'?'💰 Reçu':'💸 Paiement'}
+                                                    </button>
+                                                )}
+                                            </div>
+                                        </div>
+                                        {rappelMsg[d.id] && (
+                                            <p style={{ fontSize:11, color: rappelMsg[d.id].type === 'ok' ? T.accent : T.danger, lineHeight:1.4 }}>
+                                                {rappelMsg[d.id].type === 'ok' ? '✓' : '✗'} {rappelMsg[d.id].texte}
+                                            </p>
+                                        )}
+                                    </div>
+                                </div>
+                            );
+                        })}
+                    </div>
+                }
+            </div>
+
+            {/* MODAL PAIEMENT */}
+            {paiementModal && (
+                <div
+                    onClick={fermerPaiement}
+                    style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.6)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:1000, padding:16 }}
+                >
+                    <div
+                        onClick={e => e.stopPropagation()}
+                        style={{ background:T.surface, border:`1px solid ${T.border}`, borderRadius:16, padding:'28px 28px 24px', width:'100%', maxWidth:420, boxShadow:'0 20px 60px rgba(0,0,0,0.5)' }}
+                    >
+                        <h2 style={{ fontSize:16, fontWeight:700, color:T.text, marginBottom:4 }}>
+                            {paiementModal.type === 'Client' ? '💰 Enregistrer un encaissement' : '💸 Enregistrer un paiement'}
+                        </h2>
+                        <p style={{ fontSize:13, color:T.textSoft, marginBottom:20 }}>{getTiersNom(paiementModal.id_tiers)}</p>
+
+                        {/* Récapitulatif */}
+                        <div style={{ background:T.surface2, borderRadius:10, padding:'12px 16px', marginBottom:20 }}>
+                            <div style={{ display:'flex', justifyContent:'space-between', marginBottom:6 }}>
+                                <span style={{ fontSize:12, color:T.textSoft }}>Montant total</span>
+                                <span style={{ fontSize:12, fontWeight:600, color:T.text, fontFamily:'monospace' }}>
+                                    {parseFloat(paiementModal.montant_total).toLocaleString('fr-FR')} XOF
+                                </span>
+                            </div>
+                            <div style={{ display:'flex', justifyContent:'space-between', marginBottom:10 }}>
+                                <span style={{ fontSize:12, color:T.textSoft }}>Déjà payé</span>
+                                <span style={{ fontSize:12, fontWeight:600, color:'#22C55E', fontFamily:'monospace' }}>
+                                    {parseFloat(paiementModal.montant_paye||0).toLocaleString('fr-FR')} XOF
+                                </span>
+                            </div>
+                            <div style={{ borderTop:`1px solid ${T.border}`, paddingTop:10, display:'flex', justifyContent:'space-between' }}>
+                                <span style={{ fontSize:13, fontWeight:600, color:T.textSoft }}>Restant dû</span>
+                                <span style={{ fontSize:15, fontWeight:700, color:T.warning, fontFamily:'monospace' }}>
+                                    {restantModal.toLocaleString('fr-FR')} XOF
+                                </span>
+                            </div>
+                        </div>
+
+                        {/* Champ montant */}
+                        <div style={{ marginBottom:16 }}>
+                            <label style={{ fontSize:12, fontWeight:600, color:T.textSoft, display:'block', marginBottom:6 }}>
+                                Montant à enregistrer (XOF)
+                            </label>
+                            <input
+                                style={{ ...inp, fontSize:15, fontWeight:600 }}
+                                type="number"
+                                min="1"
+                                max={restantModal}
+                                placeholder={`Max : ${restantModal.toLocaleString('fr-FR')}`}
+                                value={montantPaiement}
+                                onChange={e => { setMontantPaiement(e.target.value); setPaiementError(''); }}
+                                autoFocus
+                                onKeyDown={e => e.key === 'Enter' && !paiementLoading && handleConfirmerPaiement()}
+                            />
+                        </div>
+
+                        {paiementError && (
+                            <p style={{ fontSize:12, color:T.danger, marginBottom:14, padding:'8px 12px', background:`${T.danger}18`, borderRadius:7 }}>
+                                {paiementError}
+                            </p>
+                        )}
+
+                        <div style={{ display:'flex', gap:10 }}>
+                            <button
+                                onClick={handleConfirmerPaiement}
+                                disabled={paiementLoading}
+                                style={{ ...btn, flex:1, opacity:paiementLoading?0.7:1, display:'flex', alignItems:'center', justifyContent:'center', gap:8 }}
+                            >
+                                {paiementLoading
+                                    ? <><span style={{ width:14, height:14, border:'2px solid #000', borderTop:'2px solid transparent', borderRadius:99, display:'inline-block', animation:'spin 0.7s linear infinite' }}/> Enregistrement...</>
+                                    : 'Confirmer'
+                                }
+                            </button>
+                            <button onClick={fermerPaiement} disabled={paiementLoading} style={{ ...btnG, flex:1 }}>
+                                Annuler
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            <style>{`@keyframes spin{to{transform:rotate(360deg);}}`}</style>
+        </Layout>
+    );
+}

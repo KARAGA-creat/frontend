@@ -14,3 +14,8 @@ export const updateDette = async (id, data) => {
     const response = await API.put(`dettes/${id}/`, data);
     return response.data;
 };
+
+export const envoyerRappelDette = async (id) => {
+    const response = await API.post(`dettes/${id}/rappel/`);
+    return response.data;
+};

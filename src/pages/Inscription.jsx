@@ -1,14 +1,127 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useDispatch } from 'react-redux';
 import { useNavigate } from 'react-router-dom';
 import { loginSuccess } from '../store/authSlice';
 import API from '../api/axios';
 
+const FEATURES = [
+    { icon: '📊', text: 'Tableau de bord en temps réel' },
+    { icon: '💸', text: 'Suivi des transactions & budgets' },
+    { icon: '📄', text: 'Rapports PDF professionnels' },
+    { icon: '👥', text: 'Gestion de votre équipe' },
+];
+
+function EcranBienvenue({ username, nomEntreprise, onContinue }) {
+    const [compte, setCompte] = useState(5);
+
+    useEffect(() => {
+        if (compte <= 0) { onContinue(); return; }
+        const t = setTimeout(() => setCompte(c => c - 1), 1000);
+        return () => clearTimeout(t);
+    }, [compte, onContinue]);
+
+    return (
+        <div style={styles.container}>
+            <style>{`
+                @keyframes popIn {
+                    0%   { transform: scale(0); opacity: 0; }
+                    70%  { transform: scale(1.15); opacity: 1; }
+                    100% { transform: scale(1); }
+                }
+                @keyframes fadeUp {
+                    from { opacity: 0; transform: translateY(20px); }
+                    to   { opacity: 1; transform: translateY(0); }
+                }
+                @keyframes drawCircle {
+                    from { stroke-dashoffset: 283; }
+                    to   { stroke-dashoffset: 0; }
+                }
+                @keyframes pulse {
+                    0%, 100% { box-shadow: 0 0 0 0 rgba(34,197,94,0.4); }
+                    50%      { box-shadow: 0 0 0 16px rgba(34,197,94,0); }
+                }
+            `}</style>
+
+            <div style={{ ...styles.card, textAlign: 'center', animation: 'fadeUp 0.5s ease' }}>
+
+                {/* Checkmark animé */}
+                <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 24 }}>
+                    <div style={{
+                        width: 88, height: 88, borderRadius: '50%',
+                        background: 'rgba(34,197,94,0.12)',
+                        border: '2px solid rgba(34,197,94,0.3)',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        animation: 'popIn 0.6s cubic-bezier(.36,.07,.19,.97) both, pulse 2s ease 0.6s infinite',
+                    }}>
+                        <svg width="44" height="44" viewBox="0 0 44 44" fill="none">
+                            <circle cx="22" cy="22" r="20" stroke="#22C55E" strokeWidth="2.5"
+                                strokeDasharray="125.6" strokeDashoffset="125.6"
+                                style={{ animation: 'drawCircle 0.6s ease 0.2s forwards' }}/>
+                            <polyline points="12,22 19,30 32,14" stroke="#22C55E" strokeWidth="3"
+                                strokeLinecap="round" strokeLinejoin="round"
+                                style={{ animation: 'popIn 0.4s ease 0.7s both', transformOrigin: 'center' }}/>
+                        </svg>
+                    </div>
+                </div>
+
+                {/* Message principal */}
+                <div style={{ animation: 'fadeUp 0.5s ease 0.3s both' }}>
+                    <p style={{ fontSize: 13, fontWeight: 700, color: '#22C55E', letterSpacing: '0.08em', textTransform: 'uppercase', marginBottom: 8 }}>
+                        Compte créé avec succès !
+                    </p>
+                    <h1 style={{ fontSize: 26, fontWeight: 800, color: '#f1f5f9', marginBottom: 8 }}>
+                        Bienvenue, {username} !
+                    </h1>
+                    <p style={{ fontSize: 14, color: '#94a3b8', marginBottom: 28, lineHeight: 1.5 }}>
+                        <span style={{ color: '#f1f5f9', fontWeight: 600 }}>{nomEntreprise}</span> est maintenant<br/>
+                        enregistrée sur FinanceIQ.
+                    </p>
+                </div>
+
+                {/* Séparateur */}
+                <div style={{ borderTop: '1px solid #1f2d45', marginBottom: 20 }} />
+
+                {/* Features */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px 16px', marginBottom: 28, textAlign: 'left', animation: 'fadeUp 0.5s ease 0.5s both' }}>
+                    {FEATURES.map(f => (
+                        <div key={f.text} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <span style={{ fontSize: 18 }}>{f.icon}</span>
+                            <span style={{ fontSize: 12, color: '#94a3b8' }}>{f.text}</span>
+                        </div>
+                    ))}
+                </div>
+
+                {/* Bouton CTA */}
+                <div style={{ animation: 'fadeUp 0.5s ease 0.7s both' }}>
+                    <button onClick={onContinue} style={{
+                        width: '100%', padding: '13px',
+                        background: 'linear-gradient(135deg, #22C55E, #16A34A)',
+                        border: 'none', borderRadius: 10,
+                        color: '#000', fontSize: 14, fontWeight: 700, cursor: 'pointer',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+                    }}>
+                        Découvrir mon tableau de bord
+                        <span style={{
+                            background: 'rgba(0,0,0,0.2)', borderRadius: '50%',
+                            width: 26, height: 26, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            fontSize: 12, fontWeight: 800,
+                        }}>{compte}</span>
+                    </button>
+                    <p style={{ fontSize: 11, color: '#475569', marginTop: 10 }}>
+                        Redirection automatique dans {compte} seconde{compte > 1 ? 's' : ''}…
+                    </p>
+                </div>
+            </div>
+        </div>
+    );
+}
+
 export default function Inscription() {
-    const dispatch  = useDispatch();
-    const navigate  = useNavigate();
-    const [error, setError]     = useState('');
-    const [loading, setLoading] = useState(false);
+    const dispatch   = useDispatch();
+    const navigate   = useNavigate();
+    const [error, setError]       = useState('');
+    const [loading, setLoading]   = useState(false);
+    const [successData, setSuccessData] = useState(null);
     const [form, setForm] = useState({
         username:       '',
         email:          '',
@@ -25,7 +138,7 @@ export default function Inscription() {
         try {
             const response = await API.post('auth/inscription/', form);
             dispatch(loginSuccess(response.data));
-            navigate('/dashboard');
+            setSuccessData({ username: form.username, nomEntreprise: form.nom_entreprise });
         } catch (err) {
             setError(
                 err.response?.data?.username?.[0] ||
@@ -37,6 +150,16 @@ export default function Inscription() {
             setLoading(false);
         }
     };
+
+    if (successData) {
+        return (
+            <EcranBienvenue
+                username={successData.username}
+                nomEntreprise={successData.nomEntreprise}
+                onContinue={() => navigate('/dashboard')}
+            />
+        );
+    }
 
     return (
         <div style={styles.container}>
@@ -104,6 +227,7 @@ export default function Inscription() {
                             value={form.devise}
                             onChange={e => setForm({...form, devise: e.target.value})}>
                             <option value="XOF">XOF — Franc CFA (UEMOA)</option>
+                            <option value="XAF">XAF — Franc CFA (CEMAC)</option>
                             <option value="GNF">GNF — Franc Guinéen</option>
                             <option value="EUR">EUR — Euro</option>
                             <option value="USD">USD — Dollar Américain</option>

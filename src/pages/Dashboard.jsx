@@ -1,393 +1,385 @@
 import { useEffect, useState } from 'react';
-import { useDispatch, useSelector } from 'react-redux';
+import { useSelector } from 'react-redux';
 import { useNavigate } from 'react-router-dom';
-import { logout } from '../store/authSlice';
-import { getTransactions } from '../api/transactionsAPI';
-import { getAlertes } from '../api/alertesAPI';
-import { getBudgets } from '../api/budgetsAPI';
-import {
-    AreaChart, Area, XAxis, YAxis, CartesianGrid,
-    Tooltip, ResponsiveContainer, PieChart, Pie, Cell
-} from 'recharts';
+import API from '../api/axios';
+import Layout, { T, useIsMobile } from '../components/Layout';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
-const T = {
-    bg:'#020617',surface:'#0F172A',surface2:'#1E293B',border:'#1E293B',
-    accent:'#22C55E',accentDim:'rgba(34,197,94,0.12)',danger:'#EF4444',
-    warning:'#F59E0B',info:'#3B82F6',purple:'#8B5CF6',
-    muted:'#475569',text:'#F8FAFC',textSoft:'#94A3B8',
-};
-
-const NAV_ITEMS = [
-    { icon:'▦', label:'Dashboard',    path:'/dashboard',    roles:['admin','gestionnaire'] },
-    { icon:'⇅', label:'Transactions', path:'/transactions', roles:['admin','gestionnaire'] },
-    { icon:'📄', label:'Dettes',      path:'/dettes',       roles:['admin','gestionnaire'] },
-    { icon:'◎', label:'Budgets',      path:'/budgets',      roles:['admin','gestionnaire'] },
-    { icon:'▲', label:'Rapports',     path:'/rapports',     roles:['admin'] },
-    { icon:'◈', label:'Alertes',      path:'/alertes',      roles:['admin','gestionnaire'] },
-    { icon:'◇', label:'Tiers',        path:'/tiers',        roles:['admin','gestionnaire'] },
-    { icon:'⚙', label:'Paramètres',   path:'/parametres',   roles:['admin'] },
-];
-
-function fmt(n){const a=Math.abs(n);if(a>=1e6)return(n/1e6).toFixed(1)+'M';if(a>=1e3)return(n/1e3).toFixed(0)+'k';return n.toFixed(0);}
-
-function buildChartData(transactions){
-    const months=['Jan','Fév','Mar','Avr','Mai','Jui','Jul','Aoû','Sep','Oct','Nov','Déc'];
-    const now=new Date();const data=[];
-    for(let i=5;i>=0;i--){
-        const d=new Date(now.getFullYear(),now.getMonth()-i,1);
-        const key=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
-        const txs=transactions.filter(t=>t.date_transaction?.startsWith(key));
-        data.push({
-            mois:months[d.getMonth()],
-            revenus:txs.filter(t=>t.type==='Entree').reduce((s,t)=>s+parseFloat(t.montant||0),0),
-            depenses:txs.filter(t=>t.type==='Sortie').reduce((s,t)=>s+parseFloat(t.montant||0),0),
-        });
-    }
-    return data;
+function fmt(n) {
+    const a = Math.abs(n);
+    if (a >= 1e6) return (n / 1e6).toFixed(1) + 'M';
+    if (a >= 1e3) return (n / 1e3).toFixed(0) + 'k';
+    return n.toFixed(0);
 }
 
-function Counter({value}){
-    const[v,setV]=useState(0);
-    useEffect(()=>{
-        let cur=0;const inc=(value/1000)*16;
-        const t=setInterval(()=>{cur+=inc;if(cur>=value){setV(value);clearInterval(t);}else setV(cur);},16);
-        return()=>clearInterval(t);
-    },[value]);
-    return<>{fmt(v)}</>;
+function fmtFull(n) {
+    return Math.abs(n).toLocaleString('fr-FR');
 }
 
-function ChartTip({active,payload,label}){
-    if(!active||!payload?.length)return null;
-    return(<div style={{background:T.surface2,border:`1px solid ${T.border}`,borderRadius:10,padding:'10px 14px',fontSize:13}}>
-        <p style={{color:T.textSoft,marginBottom:6}}>{label}</p>
-        {payload.map((p,i)=><p key={i} style={{color:p.color,margin:'2px 0'}}>{p.name}: <b>{fmt(p.value)} XOF</b></p>)}
-    </div>);
+function Counter({ value }) {
+    const [v, setV] = useState(0);
+    useEffect(() => {
+        let cur = 0;
+        const inc = (value / 1000) * 16;
+        const t = setInterval(() => {
+            cur += inc;
+            if (cur >= value) { setV(value); clearInterval(t); }
+            else setV(cur);
+        }, 16);
+        return () => clearInterval(t);
+    }, [value]);
+    return <>{fmtFull(v)}</>;
 }
 
-function KpiCard({label,value,color,suffix=''}){
-    const[hov,setHov]=useState(false);
-    return(
-        <div onMouseEnter={()=>setHov(true)} onMouseLeave={()=>setHov(false)} style={{
-            background:T.surface,border:`1px solid ${hov?color:T.border}`,borderRadius:14,
-            padding:'20px 22px',display:'flex',flexDirection:'column',gap:10,
-            transform:hov?'translateY(-2px)':'translateY(0)',transition:'all 0.2s',cursor:'default',
-        }}>
-            <span style={{fontSize:13,color:T.textSoft,fontWeight:500}}>{label}</span>
-            <div style={{fontSize:30,fontWeight:700,color:T.text,letterSpacing:'-0.03em',lineHeight:1}}>
-                <Counter value={value}/>{suffix}
-                {!suffix&&<span style={{fontSize:13,color:T.textSoft,fontWeight:400,marginLeft:5}}>XOF</span>}
-            </div>
-            <div style={{height:3,borderRadius:99,background:T.surface2}}>
-                <div style={{height:'100%',borderRadius:99,background:`linear-gradient(90deg,${color},${color}66)`,width:'65%',transition:'width 1.2s'}}/>
-            </div>
-        </div>
-    );
+const JOURS = ['Dimanche','Lundi','Mardi','Mercredi','Jeudi','Vendredi','Samedi'];
+const MOIS_LONG = ['janvier','février','mars','avril','mai','juin','juillet','août','septembre','octobre','novembre','décembre'];
+
+function dateAujourdhui() {
+    const d = new Date();
+    return `${JOURS[d.getDay()]} ${d.getDate()} ${MOIS_LONG[d.getMonth()]} ${d.getFullYear()}`;
 }
 
-function BudgetBar({budget}){
-    const taux=Math.min((parseFloat(budget.montant_consomme||0)/parseFloat(budget.montant_limite||1))*100,100);
-    const color=taux>=100?T.danger:taux>=75?T.warning:T.accent;
-    return(
-        <div style={{marginBottom:16}}>
-            <div style={{display:'flex',justifyContent:'space-between',marginBottom:6}}>
-                <span style={{fontSize:13,fontWeight:600,color:T.text}}>Budget #{budget.id_categorie||budget.id}</span>
-                <span style={{fontSize:13,fontWeight:700,color}}>{taux.toFixed(0)}%</span>
-            </div>
-            <div style={{height:7,background:T.surface2,borderRadius:99,overflow:'hidden',marginBottom:5}}>
-                <div style={{height:'100%',borderRadius:99,background:color,width:`${taux}%`,transition:'width 1s'}}/>
-            </div>
-            <div style={{fontSize:12,color:T.textSoft}}>
-                {parseFloat(budget.montant_consomme||0).toLocaleString()} / {parseFloat(budget.montant_limite||0).toLocaleString()} XOF
-            </div>
-        </div>
-    );
-}
+function PrevisionCard({ prevision, isMobile }) {
+    const { solde_actuel, solde_prevu_30j, flux_journalier, a_recevoir_30j, a_payer_30j, tendance, nb_dettes_echeance } = prevision;
+    const gain     = solde_prevu_30j - solde_actuel;
+    const enHausse = tendance === 'hausse';
+    const enBaisse = tendance === 'baisse';
+    const couleur  = enHausse ? T.accent : enBaisse ? T.danger : T.warning;
+    const fleche   = enHausse ? '↗' : enBaisse ? '↘' : '→';
 
-function TxRow({tx}){
-    const[hov,setHov]=useState(false);
-    const isE=tx.type==='Entree';
-    return(
-        <div onMouseEnter={()=>setHov(true)} onMouseLeave={()=>setHov(false)} style={{
-            display:'grid',gridTemplateColumns:'1fr 100px 130px 90px',
-            padding:'12px 16px',borderRadius:8,background:hov?T.surface2:'transparent',
-            transition:'background 0.15s',cursor:'default',alignItems:'center',
-        }}>
-            <p style={{fontSize:14,fontWeight:500,color:T.text,margin:0}}>{tx.libelle}</p>
-            <span style={{fontSize:12,fontWeight:600,color:isE?T.accent:T.danger}}>{isE?'↑':'↓'} {tx.type}</span>
-            <p style={{fontSize:14,fontWeight:700,margin:0,color:isE?T.accent:T.danger}}>
-                {isE?'+':'-'}{parseFloat(tx.montant||0).toLocaleString()} XOF
-            </p>
-            <p style={{fontSize:12,color:T.muted,margin:0}}>{tx.date_transaction}</p>
-        </div>
-    );
-}
+    return (
+        <div style={{ background:T.surface, border:`1px solid ${couleur}44`, borderRadius:14, padding:'18px 20px', position:'relative', overflow:'hidden' }}>
+            {/* Fond dégradé subtil */}
+            <div style={{ position:'absolute', bottom:-20, right:-20, width:100, height:100, borderRadius:'50%', background:`radial-gradient(circle, ${couleur}12 0%, transparent 70%)`, pointerEvents:'none' }}/>
 
-function Sidebar({collapsed,onToggle,user,alertesNonLues,onLogout}){
-    const navigate=useNavigate();
-    const path=window.location.pathname;
-    const visible=NAV_ITEMS.filter(i=>!user?.role||i.roles.includes(user.role));
-    return(
-        <aside style={{width:collapsed?64:230,minHeight:'100vh',background:T.surface,borderRight:`1px solid ${T.border}`,
-            display:'flex',flexDirection:'column',transition:'width 0.25s cubic-bezier(.4,0,.2,1)',overflow:'hidden',position:'sticky',top:0,flexShrink:0}}>
-            <div style={{padding:'22px 16px 20px',display:'flex',alignItems:'center',gap:10}}>
-                <div style={{width:34,height:34,borderRadius:9,flexShrink:0,background:`linear-gradient(135deg,${T.accent},#16A34A)`,
-                    display:'flex',alignItems:'center',justifyContent:'center',fontWeight:900,fontSize:17,color:'#000'}}>F</div>
-                {!collapsed&&<span style={{fontFamily:"'Calistoga',serif",fontSize:19,color:T.text,letterSpacing:'-0.02em',whiteSpace:'nowrap'}}>
-                    Finance<span style={{color:T.accent}}>IQ</span></span>}
+            <div style={{ display:'flex', alignItems:'flex-start', justifyContent:'space-between', marginBottom:14, gap:12 }}>
+                <div>
+                    <p style={{ fontSize:11, fontWeight:700, color:T.textSoft, textTransform:'uppercase', letterSpacing:'0.07em', marginBottom:4 }}>
+                        Prévision à 30 jours
+                    </p>
+                    <p style={{ fontSize:12, color:T.muted }}>Basé sur vos 90 derniers jours d'activité</p>
+                </div>
+                <span style={{ fontSize:24, lineHeight:1 }}>{fleche}</span>
             </div>
-            <nav style={{flex:1,padding:'4px 8px'}}>
-                {visible.map(item=>{
-                    const isActive=path===item.path;
-                    return(
-                        <div key={item.path} onClick={()=>navigate(item.path)} style={{
-                            display:'flex',alignItems:'center',gap:12,padding:'10px 10px',borderRadius:9,marginBottom:2,cursor:'pointer',
-                            background:isActive?T.accentDim:'transparent',
-                            borderLeft:isActive?`2px solid ${T.accent}`:'2px solid transparent',transition:'all 0.15s',
-                        }}>
-                            <span style={{fontSize:16,color:isActive?T.accent:T.muted,flexShrink:0,lineHeight:1}}>{item.icon}</span>
-                            {!collapsed&&<span style={{fontSize:14,fontWeight:isActive?600:400,color:isActive?T.text:T.textSoft,whiteSpace:'nowrap'}}>{item.label}</span>}
-                            {item.path==='/alertes'&&alertesNonLues>0&&(
-                                <span style={{marginLeft:'auto',background:T.danger,color:'#fff',fontSize:10,fontWeight:700,padding:'2px 6px',borderRadius:99,flexShrink:0}}>{alertesNonLues}</span>
-                            )}
+
+            {/* Solde actuel → Solde prévu */}
+            <div style={{ display:'flex', alignItems:'center', gap: isMobile ? 10 : 20, marginBottom:16, flexWrap:'wrap' }}>
+                <div style={{ textAlign:'center' }}>
+                    <p style={{ fontSize:10, color:T.muted, marginBottom:3, textTransform:'uppercase', letterSpacing:'0.05em' }}>Aujourd'hui</p>
+                    <p style={{ fontSize: isMobile ? 18 : 22, fontWeight:700, color:T.textSoft, fontFamily:'monospace' }}>
+                        {fmtFull(solde_actuel)} <span style={{ fontSize:11, fontWeight:400 }}>XOF</span>
+                    </p>
+                </div>
+
+                {/* Flèche de transition */}
+                <div style={{ flex:1, display:'flex', flexDirection:'column', alignItems:'center', minWidth:60 }}>
+                    <div style={{ height:2, width:'100%', background:`linear-gradient(90deg, ${T.surface2}, ${couleur}, ${T.surface2})`, marginBottom:4 }}/>
+                    <span style={{ fontSize:10, color:couleur, fontWeight:700 }}>
+                        {gain >= 0 ? '+' : ''}{fmtFull(Math.round(gain))} XOF
+                    </span>
+                </div>
+
+                <div style={{ textAlign:'center' }}>
+                    <p style={{ fontSize:10, color:T.muted, marginBottom:3, textTransform:'uppercase', letterSpacing:'0.05em' }}>Dans 30 jours</p>
+                    <p style={{ fontSize: isMobile ? 22 : 28, fontWeight:800, color:couleur, fontFamily:'monospace' }}>
+                        {fmtFull(solde_prevu_30j)} <span style={{ fontSize:12, fontWeight:400 }}>XOF</span>
+                    </p>
+                </div>
+            </div>
+
+            {/* Détails complémentaires */}
+            <div style={{ display:'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(3,1fr)', gap:8 }}>
+                <div style={{ background:T.surface2, borderRadius:9, padding:'9px 12px' }}>
+                    <p style={{ fontSize:10, color:T.muted, marginBottom:3 }}>Flux quotidien moyen</p>
+                    <p style={{ fontSize:13, fontWeight:700, color: flux_journalier >= 0 ? T.accent : T.danger }}>
+                        {flux_journalier >= 0 ? '+' : ''}{fmtFull(Math.round(flux_journalier))} XOF/jour
+                    </p>
+                </div>
+                {nb_dettes_echeance > 0 && (
+                    <>
+                        <div style={{ background:T.surface2, borderRadius:9, padding:'9px 12px' }}>
+                            <p style={{ fontSize:10, color:T.muted, marginBottom:3 }}>À recevoir (dettes clients)</p>
+                            <p style={{ fontSize:13, fontWeight:700, color:T.accent }}>+{fmtFull(Math.round(a_recevoir_30j))} XOF</p>
                         </div>
-                    );
-                })}
-            </nav>
-            <div style={{padding:'12px 10px',borderTop:`1px solid ${T.border}`}}>
-                {!collapsed&&(
-                    <div style={{display:'flex',alignItems:'center',gap:10,padding:'8px',marginBottom:8,borderRadius:9,background:T.surface2}}>
-                        <div style={{width:30,height:30,borderRadius:99,flexShrink:0,background:`linear-gradient(135deg,${T.info},${T.purple})`,
-                            display:'flex',alignItems:'center',justifyContent:'center',fontSize:13,fontWeight:700,color:'#fff'}}>
-                            {user?.username?.charAt(0).toUpperCase()}
+                        <div style={{ background:T.surface2, borderRadius:9, padding:'9px 12px' }}>
+                            <p style={{ fontSize:10, color:T.muted, marginBottom:3 }}>À payer (fournisseurs)</p>
+                            <p style={{ fontSize:13, fontWeight:700, color:T.danger }}>-{fmtFull(Math.round(a_payer_30j))} XOF</p>
                         </div>
-                        <div>
-                            <p style={{fontSize:13,fontWeight:600,color:T.text,margin:0}}>{user?.username}</p>
-                            <p style={{fontSize:11,color:T.muted,margin:0,textTransform:'capitalize'}}>{user?.role}</p>
-                        </div>
-                    </div>
+                    </>
                 )}
-                <button onClick={onLogout} style={{width:'100%',padding:'8px',borderRadius:8,border:`1px solid rgba(239,68,68,0.25)`,
-                    background:'rgba(239,68,68,0.08)',color:T.danger,cursor:'pointer',fontSize:13,fontWeight:600,marginBottom:8,fontFamily:'inherit'}}>
-                    {collapsed?'×':'Déconnexion'}
-                </button>
-                <button onClick={onToggle} style={{width:'100%',padding:'7px',borderRadius:8,border:'none',
-                    background:T.surface2,color:T.muted,cursor:'pointer',fontSize:13,fontFamily:'inherit'}}>
-                    {collapsed?'→':'← Réduire'}
-                </button>
             </div>
-        </aside>
+
+            {/* Message contextuel */}
+            <p style={{ fontSize:11, color:T.textSoft, marginTop:12, lineHeight:1.6, fontStyle:'italic' }}>
+                {enHausse && `Bonne tendance — votre trésorerie devrait croître de ${fmtFull(Math.round(Math.abs(gain)))} XOF en 30 jours.`}
+                {enBaisse && `Attention — à ce rythme, votre trésorerie pourrait baisser de ${fmtFull(Math.round(Math.abs(gain)))} XOF. Pensez à réduire les dépenses.`}
+                {tendance === 'stable' && `Votre trésorerie est stable. Enregistrez plus de transactions pour affiner cette prévision.`}
+            </p>
+        </div>
     );
 }
 
-export default function Dashboard(){
-    const dispatch=useDispatch();
-    const navigate=useNavigate();
-    const{user}=useSelector(s=>s.auth);
-    const[transactions,setTransactions]=useState([]);
-    const[alertes,setAlertes]=useState([]);
-    const[budgets,setBudgets]=useState([]);
-    const[loading,setLoading]=useState(true);
-    const[collapsed,setCollapsed]=useState(false);
-    const[period,setPeriod]=useState('6M');
+let _cache = null;
+let _cacheTime = 0;
+export const invalidateDashboardCache = () => { _cache = null; _cacheTime = 0; };
 
-    useEffect(()=>{
-        (async()=>{
-            try{
-                const[t,a,b]=await Promise.all([getTransactions(),getAlertes(),getBudgets()]);
-                setTransactions(t);setAlertes(a);setBudgets(b);
-            }catch(e){console.error(e);}finally{setLoading(false);}
+export default function Dashboard() {
+    const isMobile = useIsMobile();
+    const navigate  = useNavigate();
+    const { user }  = useSelector(s => s.auth);
+    const [stats, setStats]       = useState(_cache?.stats || null);
+    const [loading, setLoading]   = useState(!_cache);
+    const [showChart, setShowChart] = useState(false);
+
+    useEffect(() => {
+        const now = Date.now();
+        if (_cache && (now - _cacheTime) < 60000) { setLoading(false); return; }
+        (async () => {
+            try {
+                const s = await API.get('transactions/stats/');
+                setStats(s.data);
+                _cache = { stats: s.data };
+                _cacheTime = Date.now();
+            } catch (e) { console.error(e); }
+            finally { setLoading(false); }
         })();
-    },[]);
+    }, []);
 
-    const handleLogout=()=>{dispatch(logout());navigate('/login');};
+    const solde          = stats?.solde           || 0;
+    const entreesMois    = stats?.entrees_mois    || 0;
+    const sortiesMois    = stats?.sorties_mois    || 0;
+    const alertesNonLues = stats?.alertes_non_lues || 0;
+    const dettesRetard   = stats?.dettes_en_retard || 0;
+    const nbTransactions = stats?.nb_transactions  || 0;
+    const chartData      = stats?.evolution        || [];
+    const transactions   = stats?.transactions_recentes || [];
+    const scoreSante     = stats?.score_sante    ?? null;
+    const scoreNiveau    = stats?.score_niveau   || '';
+    const scoreCriteres  = stats?.score_criteres || [];
 
-    const totalEntrees=transactions.filter(t=>t.type==='Entree').reduce((s,t)=>s+parseFloat(t.montant||0),0);
-    const totalSorties=transactions.filter(t=>t.type==='Sortie').reduce((s,t)=>s+parseFloat(t.montant||0),0);
-    const solde=totalEntrees-totalSorties;
-    const alertesNonLues=alertes.filter(a=>a.statut==='non_lue').length;
-    const taux=totalEntrees>0?Math.abs((solde/totalEntrees)*100):0;
-    const chartData=buildChartData(transactions);
-    const total=totalEntrees+totalSorties||1;
-    const pieData=[
-        {name:'Entrées',value:Math.round((totalEntrees/total)*100),color:T.accent},
-        {name:'Sorties',value:Math.round((totalSorties/total)*100),color:T.danger},
-    ];
+    const scoreColor  = scoreSante >= 80 ? '#22C55E' : scoreSante >= 60 ? '#F59E0B' : scoreSante >= 40 ? '#F97316' : '#EF4444';
+    const scoreEmoji  = scoreSante >= 80 ? '🟢' : scoreSante >= 60 ? '🟡' : scoreSante >= 40 ? '🟠' : '🔴';
+    const soldeColor  = solde >= 0 ? T.accent : T.danger;
+    const prevision   = stats?.prevision || null;
 
-    if(loading)return(
-        <div style={{display:'flex',alignItems:'center',justifyContent:'center',height:'100vh',background:T.bg,color:T.textSoft,fontSize:16,gap:12,flexDirection:'column'}}>
+    const [scoreOpen, setScoreOpen] = useState(false);
+
+    if (loading) return (
+        <div style={{ display:'flex', alignItems:'center', justifyContent:'center', height:'100vh', background:T.bg, color:T.textSoft, flexDirection:'column', gap:12 }}>
             <style>{`@keyframes spin{to{transform:rotate(360deg);}}`}</style>
-            <div style={{width:36,height:36,borderRadius:99,border:`3px solid ${T.surface2}`,borderTop:`3px solid ${T.accent}`,animation:'spin 0.8s linear infinite'}}/>
+            <div style={{ width:36, height:36, borderRadius:99, border:`3px solid ${T.surface2}`, borderTop:`3px solid ${T.accent}`, animation:'spin 0.8s linear infinite' }}/>
             Chargement…
         </div>
     );
 
-    return(
-        <div style={{display:'flex',minHeight:'100vh',background:T.bg,fontFamily:"'Inter',sans-serif",color:T.text}}>
-            <style>{`
-                @import url('https://fonts.googleapis.com/css2?family=Calistoga&family=Inter:wght@300;400;500;600;700&display=swap');
-                *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
-                body{background:${T.bg};}
-                ::-webkit-scrollbar{width:5px;}
-                ::-webkit-scrollbar-thumb{background:${T.surface2};border-radius:4px;}
-                button{font-family:inherit;}
-            `}</style>
+    return (
+        <Layout alertesNonLues={alertesNonLues}>
+            <div style={{ padding: isMobile ? '16px' : '28px 36px', maxWidth: 900, margin:'0 auto' }}>
 
-            <Sidebar collapsed={collapsed} onToggle={()=>setCollapsed(p=>!p)} user={user} alertesNonLues={alertesNonLues} onLogout={handleLogout}/>
-
-            <main style={{flex:1,padding:'28px 32px',overflowY:'auto',minWidth:0}}>
-
-                {/* HEADER */}
-                <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:30}}>
-                    <div>
-                        <h1 style={{fontFamily:"'Calistoga',serif",fontSize:26,fontWeight:400,letterSpacing:'-0.02em'}}>Tableau de bord</h1>
-                        <p style={{color:T.textSoft,fontSize:13,marginTop:4}}>Aperçu financier · {transactions.length} transaction{transactions.length>1?'s':''}</p>
-                    </div>
-                    <div style={{display:'flex',gap:8}}>
-                        {['1M','3M','6M','1A'].map(p=>(
-                            <button key={p} onClick={()=>setPeriod(p)} style={{
-                                padding:'7px 14px',borderRadius:8,
-                                border:period===p?'none':`1px solid ${T.border}`,
-                                background:period===p?T.accent:'transparent',
-                                color:period===p?'#000':T.textSoft,
-                                fontWeight:period===p?700:400,cursor:'pointer',fontSize:13,transition:'all 0.15s',
-                            }}>{p}</button>
-                        ))}
-                    </div>
+                {/* ── ACCUEIL PERSONNALISÉ ── */}
+                <div style={{ marginBottom: 24 }}>
+                    <h1 style={{ fontFamily:"'Calistoga',serif", fontSize: isMobile ? 20 : 24, fontWeight:400, color:T.text }}>
+                        Bonjour, {user?.username} 👋
+                    </h1>
+                    <p style={{ color:T.textSoft, fontSize:13, marginTop:4 }}>
+                        {dateAujourdhui()} · {nbTransactions} opération{nbTransactions > 1 ? 's' : ''} enregistrée{nbTransactions > 1 ? 's' : ''}
+                    </p>
                 </div>
 
-                {/* KPIs */}
-                <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:14,marginBottom:24}}>
-                    <KpiCard label="Solde actuel"  value={Math.abs(solde)}  color={solde>=0?T.accent:T.danger}/>
-                    <KpiCard label="Total Entrées" value={totalEntrees}      color={T.accent}/>
-                    <KpiCard label="Total Sorties" value={totalSorties}      color={T.danger}/>
-                    <KpiCard label="Taux de marge" value={taux}              color={T.info} suffix="%"/>
-                </div>
+                {/* ── SOLDE + SCORE (2 colonnes) ── */}
+                <div style={{ display:'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap:14, marginBottom:14 }}>
 
-                {/* CHARTS */}
-                <div style={{display:'grid',gridTemplateColumns:'1.8fr 1fr',gap:14,marginBottom:24}}>
-                    <div style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:14,padding:'22px 24px'}}>
-                        <div style={{display:'flex',justifyContent:'space-between',marginBottom:20}}>
-                            <div>
-                                <h2 style={{fontSize:15,fontWeight:600}}>Entrées vs Sorties</h2>
-                                <p style={{fontSize:12,color:T.textSoft,marginTop:3}}>6 derniers mois · XOF</p>
-                            </div>
-                            <div style={{display:'flex',gap:14}}>
-                                {[['Entrées',T.accent],['Sorties',T.danger]].map(([l,c])=>(
-                                    <div key={l} style={{display:'flex',alignItems:'center',gap:6}}>
-                                        <div style={{width:8,height:8,borderRadius:99,background:c}}/>
-                                        <span style={{fontSize:12,color:T.textSoft}}>{l}</span>
-                                    </div>
-                                ))}
-                            </div>
+                    {/* Solde actuel */}
+                    <div style={{ background:T.surface, border:`1px solid ${T.border}`, borderRadius:16, padding:'22px 24px', position:'relative', overflow:'hidden' }}>
+                        <div style={{ position:'absolute', top:-30, right:-30, width:120, height:120, borderRadius:'50%', background:`radial-gradient(circle, ${soldeColor}15 0%, transparent 70%)`, pointerEvents:'none' }}/>
+                        <p style={{ fontSize:12, fontWeight:600, color:T.textSoft, textTransform:'uppercase', letterSpacing:'0.07em', marginBottom:10 }}>Solde actuel</p>
+                        <div style={{ fontSize: isMobile ? 30 : 36, fontWeight:800, color:soldeColor, letterSpacing:'-0.03em', lineHeight:1 }}>
+                            {solde < 0 ? '-' : ''}<Counter value={Math.abs(solde)}/>
                         </div>
-                        <ResponsiveContainer width="100%" height={220}>
-                            <AreaChart data={chartData} margin={{top:4,right:4,left:0,bottom:0}}>
-                                <defs>
-                                    <linearGradient id="gR" x1="0" y1="0" x2="0" y2="1">
-                                        <stop offset="5%" stopColor={T.accent} stopOpacity={0.2}/>
-                                        <stop offset="95%" stopColor={T.accent} stopOpacity={0}/>
-                                    </linearGradient>
-                                    <linearGradient id="gD" x1="0" y1="0" x2="0" y2="1">
-                                        <stop offset="5%" stopColor={T.danger} stopOpacity={0.15}/>
-                                        <stop offset="95%" stopColor={T.danger} stopOpacity={0}/>
-                                    </linearGradient>
-                                </defs>
-                                <CartesianGrid strokeDasharray="3 3" stroke={T.border} vertical={false}/>
-                                <XAxis dataKey="mois" tick={{fill:T.muted,fontSize:12}} axisLine={false} tickLine={false}/>
-                                <YAxis tickFormatter={v=>fmt(v)} tick={{fill:T.muted,fontSize:11}} axisLine={false} tickLine={false} width={52}/>
-                                <Tooltip content={<ChartTip/>}/>
-                                <Area type="monotone" dataKey="revenus"  name="Entrées" stroke={T.accent} strokeWidth={2.5} fill="url(#gR)" dot={false} activeDot={{r:5,fill:T.accent}}/>
-                                <Area type="monotone" dataKey="depenses" name="Sorties" stroke={T.danger} strokeWidth={2.5} fill="url(#gD)" dot={false} activeDot={{r:5,fill:T.danger}}/>
-                            </AreaChart>
-                        </ResponsiveContainer>
-                    </div>
-
-                    <div style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:14,padding:'22px 24px'}}>
-                        <h2 style={{fontSize:15,fontWeight:600,marginBottom:4}}>Répartition flux</h2>
-                        <p style={{fontSize:12,color:T.textSoft,marginBottom:12}}>Entrées vs Sorties globales</p>
-                        <ResponsiveContainer width="100%" height={160}>
-                            <PieChart>
-                                <Pie data={pieData} dataKey="value" cx="50%" cy="50%" innerRadius={48} outerRadius={70} paddingAngle={4} strokeWidth={0}>
-                                    {pieData.map((c,i)=><Cell key={i} fill={c.color}/>)}
-                                </Pie>
-                                <Tooltip formatter={v=>`${v}%`} contentStyle={{background:T.surface2,border:`1px solid ${T.border}`,borderRadius:8,fontSize:12}}/>
-                            </PieChart>
-                        </ResponsiveContainer>
-                        <div style={{display:'flex',flexDirection:'column',gap:10,marginTop:8}}>
-                            {pieData.map(c=>(
-                                <div key={c.name} style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
-                                    <div style={{display:'flex',alignItems:'center',gap:8}}>
-                                        <div style={{width:8,height:8,borderRadius:2,background:c.color}}/>
-                                        <span style={{fontSize:13,color:T.textSoft}}>{c.name}</span>
-                                    </div>
-                                    <span style={{fontSize:13,fontWeight:700,color:T.text}}>{c.value}%</span>
-                                </div>
-                            ))}
-                            <div style={{paddingTop:8,borderTop:`1px solid ${T.border}`}}>
-                                <div style={{display:'flex',justifyContent:'space-between'}}>
-                                    <span style={{fontSize:12,color:T.textSoft}}>Alertes non lues</span>
-                                    <span style={{fontSize:12,fontWeight:700,color:alertesNonLues>0?T.warning:T.accent}}>{alertesNonLues}</span>
-                                </div>
-                            </div>
+                        <p style={{ fontSize:14, color:T.textSoft, marginTop:6 }}>XOF</p>
+                        <div style={{ marginTop:14, height:4, background:T.surface2, borderRadius:99 }}>
+                            <div style={{ height:'100%', width:'100%', borderRadius:99, background:`linear-gradient(90deg, ${soldeColor}, ${soldeColor}55)` }}/>
                         </div>
+                        <p style={{ fontSize:11, color:T.muted, marginTop:8 }}>
+                            {solde >= 0 ? '✓ Solde positif — votre entreprise est dans le vert' : '⚠ Solde négatif — attention aux dépenses'}
+                        </p>
                     </div>
-                </div>
 
-                {/* TRANSACTIONS + BUDGETS */}
-                <div style={{display:'grid',gridTemplateColumns:'1.4fr 1fr',gap:14}}>
+                    {/* Score de santé — simplifié */}
+                    {scoreSante !== null && (
+                        <div style={{ background:T.surface, border:`1px solid ${T.border}`, borderRadius:16, padding:'22px 24px' }}>
+                            <p style={{ fontSize:12, fontWeight:600, color:T.textSoft, textTransform:'uppercase', letterSpacing:'0.07em', marginBottom:10 }}>Santé de l'entreprise</p>
 
-                    <div style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:14,overflow:'hidden'}}>
-                        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'20px 20px 14px'}}>
-                            <div>
-                                <h2 style={{fontSize:15,fontWeight:600}}>Transactions récentes</h2>
-                                <p style={{fontSize:12,color:T.textSoft,marginTop:3}}>5 dernières opérations</p>
+                            <div style={{ display:'flex', alignItems:'flex-end', gap:10, marginBottom:12 }}>
+                                <span style={{ fontSize: isMobile ? 36 : 44, fontWeight:800, color:scoreColor, lineHeight:1, letterSpacing:'-0.03em' }}>{scoreSante}</span>
+                                <span style={{ fontSize:16, color:T.textSoft, marginBottom:6 }}>/100</span>
+                                <span style={{ fontSize:13, fontWeight:700, color:scoreColor, marginBottom:6 }}>{scoreEmoji} {scoreNiveau}</span>
                             </div>
-                            <button onClick={()=>navigate('/transactions')}
-                                onMouseEnter={e=>{e.target.style.borderColor=T.accent;e.target.style.color=T.accent;}}
-                                onMouseLeave={e=>{e.target.style.borderColor=T.border;e.target.style.color=T.textSoft;}}
-                                style={{padding:'7px 14px',borderRadius:8,border:`1px solid ${T.border}`,background:'transparent',color:T.textSoft,cursor:'pointer',fontSize:12,fontWeight:500,transition:'all 0.15s'}}>
-                                Voir tout →
+
+                            {/* Barre de progression simple */}
+                            <div style={{ height:8, background:T.surface2, borderRadius:99, marginBottom:12, overflow:'hidden' }}>
+                                <div style={{ height:'100%', width:`${scoreSante}%`, background:`linear-gradient(90deg, ${scoreColor}, ${scoreColor}aa)`, borderRadius:99, transition:'width 1.2s' }}/>
+                            </div>
+
+                            {/* Critères rapides */}
+                            <div style={{ display:'flex', flexWrap:'wrap', gap:'6px 10px', marginBottom:12 }}>
+                                {scoreCriteres.map(c => {
+                                    const ok = c.pts >= c.max;
+                                    const half = c.pts >= c.max / 2;
+                                    const icon = ok ? '✓' : half ? '⚠' : '✗';
+                                    const col  = ok ? '#22C55E' : half ? '#F59E0B' : '#EF4444';
+                                    return (
+                                        <span key={c.label} style={{ fontSize:11, color:col, fontWeight:600, display:'flex', alignItems:'center', gap:3 }}>
+                                            <span>{icon}</span>{c.label}
+                                        </span>
+                                    );
+                                })}
+                            </div>
+
+                            <button onClick={() => setScoreOpen(p => !p)} style={{ fontSize:12, color:T.info, background:'transparent', border:'none', cursor:'pointer', padding:0, fontWeight:600 }}>
+                                {scoreOpen ? '▲ Masquer le détail' : '▼ Voir le détail'}
                             </button>
+
+                            {scoreOpen && (
+                                <div style={{ marginTop:12, display:'flex', flexDirection:'column', gap:6 }}>
+                                    {scoreCriteres.map(c => {
+                                        const pct = c.pts / c.max;
+                                        const col = pct >= 1 ? '#22C55E' : pct >= 0.5 ? '#F59E0B' : '#EF4444';
+                                        return (
+                                            <div key={c.label} style={{ display:'flex', alignItems:'center', gap:10, padding:'7px 10px', background:T.surface2, borderRadius:8 }}>
+                                                <div style={{ flex:1 }}>
+                                                    <div style={{ display:'flex', justifyContent:'space-between', marginBottom:4 }}>
+                                                        <span style={{ fontSize:12, color:T.text, fontWeight:500 }}>{c.label}</span>
+                                                        <span style={{ fontSize:11, color:col, fontWeight:700 }}>{c.pts}/{c.max}</span>
+                                                    </div>
+                                                    <div style={{ height:3, background:T.border, borderRadius:99, overflow:'hidden' }}>
+                                                        <div style={{ height:'100%', width:`${pct*100}%`, background:col, borderRadius:99 }}/>
+                                                    </div>
+                                                    <p style={{ fontSize:10, color:T.muted, marginTop:3 }}>{c.detail}</p>
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            )}
                         </div>
-                        <div style={{borderTop:`1px solid ${T.border}`}}>
-                            <div style={{display:'grid',gridTemplateColumns:'1fr 100px 130px 90px',padding:'8px 16px 10px'}}>
-                                {['Libellé','Type','Montant','Date'].map(h=>(
-                                    <span key={h} style={{fontSize:11,fontWeight:600,color:T.muted,textTransform:'uppercase',letterSpacing:'0.07em'}}>{h}</span>
-                                ))}
-                            </div>
-                            <div style={{padding:'4px 4px 10px'}}>
-                                {transactions.length===0
-                                    ?<p style={{textAlign:'center',color:T.muted,fontSize:14,padding:'20px'}}>Aucune transaction</p>
-                                    :transactions.slice(0,5).map((tx,i)=><TxRow key={tx.id||i} tx={tx}/>)
-                                }
-                            </div>
+                    )}
+                </div>
+
+                {/* ── CE MOIS + ALERTES (4 blocs) ── */}
+                <div style={{ display:'grid', gridTemplateColumns: isMobile ? '1fr 1fr' : 'repeat(4, 1fr)', gap:10, marginBottom:20 }}>
+                    {[
+                        { label:'Entrées ce mois',  val: fmtFull(entreesMois) + ' XOF', color:T.accent,  icon:'↑' },
+                        { label:'Sorties ce mois',  val: fmtFull(sortiesMois) + ' XOF', color:T.danger,  icon:'↓' },
+                        { label:'Alertes actives',  val: alertesNonLues + ' alerte' + (alertesNonLues > 1 ? 's' : ''), color: alertesNonLues > 0 ? T.warning : T.textSoft, icon:'🔔', onClick: () => navigate('/alertes') },
+                        { label:'Dettes en retard', val: dettesRetard + ' dossier' + (dettesRetard > 1 ? 's' : ''),    color: dettesRetard  > 0 ? T.danger  : T.textSoft, icon:'📄', onClick: () => navigate('/dettes')  },
+                    ].map(k => (
+                        <div key={k.label} onClick={k.onClick} style={{
+                            background:T.surface, border:`1px solid ${T.border}`, borderRadius:12,
+                            padding:'13px 14px', cursor: k.onClick ? 'pointer' : 'default',
+                            transition:'border-color 0.15s',
+                        }}>
+                            <p style={{ fontSize:10, color:T.textSoft, textTransform:'uppercase', letterSpacing:'0.06em', marginBottom:6, fontWeight:600 }}>{k.label}</p>
+                            <p style={{ fontSize:14, fontWeight:700, color:k.color, lineHeight:1 }}>
+                                <span style={{ marginRight:5 }}>{k.icon}</span>{k.val}
+                            </p>
                         </div>
+                    ))}
+                </div>
+
+                {/* ── PRÉVISION DE TRÉSORERIE ── */}
+                {prevision && (
+                    <div style={{ marginBottom:14 }}>
+                        <PrevisionCard prevision={prevision} isMobile={isMobile} />
+                    </div>
+                )}
+
+                {/* ── DERNIÈRES OPÉRATIONS ── */}
+                <div style={{ background:T.surface, border:`1px solid ${T.border}`, borderRadius:14, overflow:'hidden', marginBottom:14 }}>
+                    <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', padding:'16px 18px' }}>
+                        <div>
+                            <h2 style={{ fontSize:15, fontWeight:700, color:T.text }}>Dernières opérations</h2>
+                            <p style={{ fontSize:12, color:T.textSoft, marginTop:2 }}>5 mouvements les plus récents</p>
+                        </div>
+                        <button onClick={() => navigate('/transactions')} style={{ padding:'7px 14px', borderRadius:8, border:`1px solid ${T.border}`, background:'transparent', color:T.textSoft, cursor:'pointer', fontSize:12, fontWeight:600 }}>
+                            Voir tout →
+                        </button>
                     </div>
 
-                    <div style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:14,padding:'22px 24px'}}>
-                        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:20}}>
-                            <div>
-                                <h2 style={{fontSize:15,fontWeight:600}}>Suivi des budgets</h2>
-                                <p style={{fontSize:12,color:T.textSoft,marginTop:3}}>{budgets.length} budget{budgets.length>1?'s':''} actif{budgets.length>1?'s':''}</p>
-                            </div>
-                            <button onClick={()=>navigate('/budgets')}
-                                onMouseEnter={e=>{e.target.style.borderColor=T.accent;e.target.style.color=T.accent;}}
-                                onMouseLeave={e=>{e.target.style.borderColor=T.border;e.target.style.color=T.textSoft;}}
-                                style={{padding:'7px 14px',borderRadius:8,border:`1px solid ${T.border}`,background:'transparent',color:T.textSoft,cursor:'pointer',fontSize:12,fontWeight:500,transition:'all 0.15s'}}>
-                                Gérer →
-                            </button>
-                        </div>
-                        {budgets.length===0
-                            ?<p style={{color:T.muted,fontSize:14,textAlign:'center',padding:'20px 0'}}>Aucun budget défini</p>
-                            :budgets.slice(0,4).map((b,i)=><BudgetBar key={b.id||i} budget={b}/>)
+                    <div style={{ borderTop:`1px solid ${T.border}` }}>
+                        {transactions.length === 0
+                            ? <p style={{ textAlign:'center', color:T.muted, fontSize:14, padding:'28px' }}>Aucune opération enregistrée</p>
+                            : transactions.slice(0, 5).map((tx, i) => {
+                                const isE = tx.type === 'Entree';
+                                return (
+                                    <div key={tx.id || i} style={{ display:'flex', alignItems:'center', gap:14, padding:'13px 18px', borderBottom: i < 4 ? `1px solid ${T.border}` : 'none' }}>
+                                        <div style={{ width:36, height:36, borderRadius:10, flexShrink:0, background: isE ? 'rgba(34,197,94,0.12)' : 'rgba(239,68,68,0.12)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:16 }}>
+                                            {isE ? '↑' : '↓'}
+                                        </div>
+                                        <div style={{ flex:1, minWidth:0 }}>
+                                            <p style={{ fontSize:13, fontWeight:600, color:T.text, margin:0, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+                                                {tx.libelle || '—'}
+                                            </p>
+                                            <p style={{ fontSize:11, color:T.muted, margin:'2px 0 0' }}>
+                                                {tx.categorie || (isE ? 'Entrée' : 'Sortie')} · {tx.date_transaction}
+                                            </p>
+                                        </div>
+                                        <span style={{ fontSize:14, fontWeight:700, color: isE ? T.accent : T.danger, flexShrink:0 }}>
+                                            {isE ? '+' : '-'}{parseFloat(tx.montant || 0).toLocaleString('fr-FR')} XOF
+                                        </span>
+                                    </div>
+                                );
+                            })
                         }
                     </div>
                 </div>
 
-                <p style={{textAlign:'center',fontSize:11,color:T.muted,marginTop:32,paddingBottom:8}}>
-                    FinanceIQ · © 2025 · Franc CFA (XOF)
+                {/* ── GRAPHIQUE DÉPLIABLE ── */}
+                <div style={{ background:T.surface, border:`1px solid ${T.border}`, borderRadius:14, overflow:'hidden', marginBottom:20 }}>
+                    <button
+                        onClick={() => setShowChart(p => !p)}
+                        style={{ width:'100%', display:'flex', justifyContent:'space-between', alignItems:'center', padding:'14px 18px', background:'transparent', border:'none', cursor:'pointer', textAlign:'left' }}
+                    >
+                        <div>
+                            <span style={{ fontSize:14, fontWeight:600, color:T.text }}>Évolution sur 6 mois</span>
+                            <span style={{ fontSize:12, color:T.textSoft, marginLeft:10 }}>Entrées vs Sorties</span>
+                        </div>
+                        <span style={{ fontSize:18, color:T.muted, transition:'transform 0.2s', transform: showChart ? 'rotate(180deg)' : 'none' }}>⌄</span>
+                    </button>
+
+                    {showChart && (
+                        <div style={{ padding:'0 18px 18px', borderTop:`1px solid ${T.border}` }}>
+                            <div style={{ display:'flex', gap:16, marginBottom:12, paddingTop:14 }}>
+                                {[['Entrées', T.accent], ['Sorties', T.danger]].map(([l, c]) => (
+                                    <div key={l} style={{ display:'flex', alignItems:'center', gap:5 }}>
+                                        <div style={{ width:10, height:10, borderRadius:2, background:c }}/>
+                                        <span style={{ fontSize:11, color:T.textSoft }}>{l}</span>
+                                    </div>
+                                ))}
+                            </div>
+                            <ResponsiveContainer width="100%" height={isMobile ? 180 : 220}>
+                                <BarChart data={chartData} margin={{ top:4, right:4, left:0, bottom:0 }} barCategoryGap="30%" barGap={3}>
+                                    <CartesianGrid strokeDasharray="3 3" stroke={T.border} vertical={false}/>
+                                    <XAxis dataKey="mois" tick={{ fill:T.muted, fontSize:11 }} axisLine={false} tickLine={false}/>
+                                    <YAxis tickFormatter={v => fmt(v)} tick={{ fill:T.muted, fontSize:11 }} axisLine={false} tickLine={false} width={42}/>
+                                    <Tooltip
+                                        cursor={{ fill:'rgba(255,255,255,0.04)' }}
+                                        contentStyle={{ background:T.surface2, border:`1px solid ${T.border}`, borderRadius:10, fontSize:12 }}
+                                        labelStyle={{ color:T.textSoft, marginBottom:4 }}
+                                        formatter={(val, name) => [`${fmt(val)} XOF`, name]}
+                                    />
+                                    <Bar dataKey="revenus"  name="Entrées" fill={T.accent} radius={[4,4,0,0]} maxBarSize={32}/>
+                                    <Bar dataKey="depenses" name="Sorties" fill={T.danger} radius={[4,4,0,0]} maxBarSize={32}/>
+                                </BarChart>
+                            </ResponsiveContainer>
+                        </div>
+                    )}
+                </div>
+
+                <p style={{ textAlign:'center', fontSize:11, color:T.muted, paddingBottom:8 }}>
+                    FinanceIQ · © 2026
                 </p>
-            </main>
-        </div>
+            </div>
+        </Layout>
     );
 }
