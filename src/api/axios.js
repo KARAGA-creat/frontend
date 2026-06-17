@@ -52,7 +52,7 @@ API.interceptors.response.use(
 
             try {
                 // Tente de renouveler l'access token
-                const res      = await axios.post('/api/auth/refresh/', { refresh });
+                const res      = await axios.post(`${BASE}auth/refresh/`, { refresh });
                 const newToken = res.data.access;
                 localStorage.setItem('access_token', newToken);
                 API.defaults.headers.common.Authorization = `Bearer ${newToken}`;
