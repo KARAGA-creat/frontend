@@ -14,6 +14,7 @@ import Inscription from './pages/Inscription';
 import Activation from './pages/Activation';
 import Guide from './pages/Guide';
 import Caisse from './pages/Caisse';
+import AccesExpire from './pages/AccesExpire';
 
 
 function PrivateRoute({ children }) {
@@ -96,6 +97,7 @@ export default function App() {
         <PublicOnlyRoute><Inscription /></PublicOnlyRoute>
 } />
     <Route path="/activation/:token" element={<Activation />} />
+    <Route path="/acces-expire" element={<AccesExpire />} />
     <Route path="/guide"   element={<PrivateRoute><Guide /></PrivateRoute>} />
     <Route path="/caisse" element={<PrivateRoute><Caisse /></PrivateRoute>} />
             </Routes>

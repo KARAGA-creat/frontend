@@ -53,8 +53,10 @@ export default function Login() {
             const resp   = err?.response?.data;
             const status = err?.response?.status;
 
-            if (status === 429) {
-                // IP bloquée
+            if (status === 403 && resp?.acces_expire) {
+                navigate('/acces-expire');
+                return;
+            } else if (status === 429) {
                 const attente = resp?.attente_secondes || 900;
                 setBlockedFor(attente);
                 setAttemptsLeft(0);
